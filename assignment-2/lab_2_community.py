@@ -246,7 +246,8 @@ class Lab2Community(Community, PeerObserver):
         print(f"Peer added: {peer}")
         if peer.key.key_to_bin() in self.teammates:
             self.teammates[peer.key.key_to_bin()] = PeerInfo(peer)
-            self.distribute_group_id()
+            if self.group_id:
+                self.distribute_group_id(self.group_id)
 
         if peer.key.key_to_bin() == SERVER_PUBLIC_KEY:
             self.server = peer
