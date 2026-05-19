@@ -112,7 +112,6 @@ class Lab2Community(Community, PeerObserver):
         self.add_message_handler(SignatureNotification, self.on_signature_notification)
         self.add_message_handler(DoneNotification, self.on_done_notification)
         self.group_id: str | None = None
-        self.server_key: str | None = None
         self.server: Peer | None = None
         self.teammates: dict[bytes, PeerInfo | None] = {}
         self.team_keys: list[bytes] | None = None
@@ -129,15 +128,15 @@ class Lab2Community(Community, PeerObserver):
         self.group_id = group_id
         self.done_future = asyncio.get_running_loop().create_future()
 
-
-    def started(self) -> None:
-        self.team_keys = sorted(list(self.teammates.keys()) + [self.my_peer.key])
-        self.own_index = self.team_keys.index(self.my_peer.key)
+        self.team_keys = sorted(list(self.teammates.keys()) + [self.my_peer.key.key_to_bin()])
+        self.own_index = self.team_keys.index(self.my_peer.key.key_to_bin())
         self.submission_round = self.get_submission_round_number()
         self.network.add_peer_observer(self)
 
         print(f"Own index: {self.own_index}")
 
+
+    def started(self) -> None:
         self.run_part_1()
 
     def run_part_1(self) -> None:
@@ -164,7 +163,7 @@ class Lab2Community(Community, PeerObserver):
                 self.ez_send(mate.peer, ReadyRequest(group_id))
 
     def create_group(self) -> None:
-        print("Creating group")
+        print(f"Creating group with keys {self.team_keys}")
         self.ez_send(self.server, RegisterRequest(*self.team_keys))
 
     def try_part_2(self):
@@ -234,7 +233,7 @@ class Lab2Community(Community, PeerObserver):
         """
         signatures = []
         for key in self.team_keys:
-            if key == self.my_peer.key:
+            if key == self.my_peer.key.key_to_bin():
                 signature = self.sign(self.submission_nonce)
             else:
                 signature = self.teammates[key].signature
@@ -267,7 +266,7 @@ class Lab2Community(Community, PeerObserver):
         if peer.key.key_to_bin() in self.teammates:
             self.teammates[peer.key.key_to_bin()] = None
 
-        if peer.key.hex() == self.server_key:
+        if peer.key.key_to_bin() == SERVER_PUBLIC_KEY:
             self.server = None
 
     def is_server(self, peer):
