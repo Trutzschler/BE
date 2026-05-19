@@ -165,7 +165,7 @@ class Lab2Community(Community, PeerObserver):
 
     def create_group(self) -> None:
         print("Creating group")
-        self.ez_send(self.server, RegisterRequest(**self.team_keys))
+        self.ez_send(self.server, RegisterRequest(*self.team_keys))
 
     def try_part_2(self):
         """
@@ -218,7 +218,7 @@ class Lab2Community(Community, PeerObserver):
         if not self.all_signatures_ready():
             return
         signatures = self.generate_group_signature()
-        submission = BundleSubmission(self.group_id, self.submission_round, **signatures)
+        submission = BundleSubmission(self.group_id, self.submission_round, *signatures)
         self.ez_send(self.server, submission)
 
     def all_signatures_ready(self):
@@ -260,6 +260,7 @@ class Lab2Community(Community, PeerObserver):
         if peer.key.key_to_bin() == SERVER_PUBLIC_KEY:
             print("Peer is server")
             self.server = peer
+            self.run_part_1()
 
     def on_peer_removed(self, peer: Peer) -> None:
         print(f"Peer removed: {peer}")
