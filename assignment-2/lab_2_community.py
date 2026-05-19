@@ -136,6 +136,8 @@ class Lab2Community(Community, PeerObserver):
         self.submission_round = self.get_submission_round_number()
         self.network.add_peer_observer(self)
 
+        print(f"Own index: {self.own_index}")
+
         self.run_part_1()
 
     def run_part_1(self) -> None:
@@ -144,6 +146,7 @@ class Lab2Community(Community, PeerObserver):
         Otherwise, we request a group id from the server.
         """
         if self.own_index == 0:
+            print("Running part 1")
             self.obtain_group_id()
 
     def obtain_group_id(self) -> None:
@@ -151,13 +154,17 @@ class Lab2Community(Community, PeerObserver):
             self.distribute_group_id(self.group_id)
         elif self.server:
             self.create_group()
+        else:
+            print("No server found yet")
 
     def distribute_group_id(self, group_id: str) -> None:
+        print("Distributing group id {group_id}")
         for mate in self.teammates.values():
             if mate.peer and not mate.sent_group_id:
                 self.ez_send(mate.peer, ReadyRequest(group_id))
 
     def create_group(self) -> None:
+        print("Creating group")
         self.ez_send(self.server, RegisterRequest(**self.team_keys))
 
     def try_part_2(self):
@@ -245,11 +252,13 @@ class Lab2Community(Community, PeerObserver):
     def on_peer_added(self, peer: Peer) -> None:
         print(f"Peer added: {peer}")
         if peer.key.key_to_bin() in self.teammates:
+            print("Peer is teammate")
             self.teammates[peer.key.key_to_bin()] = PeerInfo(peer)
             if self.group_id:
                 self.distribute_group_id(self.group_id)
 
         if peer.key.key_to_bin() == SERVER_PUBLIC_KEY:
+            print("Peer is server")
             self.server = peer
 
     def on_peer_removed(self, peer: Peer) -> None:
