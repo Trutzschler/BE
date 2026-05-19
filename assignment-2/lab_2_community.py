@@ -128,8 +128,8 @@ class Lab2Community(Community, PeerObserver):
         self.group_id = group_id
         self.done_future = asyncio.get_running_loop().create_future()
 
-        self.team_keys = sorted(list(self.teammates.keys()) + [self.my_peer.key.key_to_bin().hex()])
-        self.own_index = self.team_keys.index(self.my_peer.key.key_to_bin().hex())
+        self.team_keys = sorted(list(self.teammates.keys()) + [self.my_peer.public_key.key_to_bin().hex()])
+        self.own_index = self.team_keys.index(self.my_peer.public_key.key_to_bin().hex())
         self.submission_round = self.get_submission_round_number()
         self.network.add_peer_observer(self)
 
@@ -233,7 +233,7 @@ class Lab2Community(Community, PeerObserver):
         """
         signatures = []
         for key in self.team_keys:
-            if key == self.my_peer.key.key_to_bin().hex():
+            if key == self.my_peer.public_key.key_to_bin().hex():
                 signature = self.sign(self.submission_nonce)
             else:
                 signature = self.teammates[key].signature
@@ -245,39 +245,39 @@ class Lab2Community(Community, PeerObserver):
         Associate the given signature with the given peer for the round for which the current peer
         is responsible.
         """
-        assert peer.key.key_to_bin().hex() in self.teammates, "expected peer to be a teammate"
-        self.teammates[peer.key.key_to_bin().hex()].signature = signature
+        assert peer.public_key.key_to_bin().hex() in self.teammates, "expected peer to be a teammate"
+        self.teammates[peer.public_key.key_to_bin().hex()].signature = signature
 
     def on_peer_added(self, peer: Peer) -> None:
         print(f"Peer added: {peer}")
-        if peer.key.key_to_bin().hex() in self.teammates:
+        if peer.public_key.key_to_bin().hex() in self.teammates:
             print("Peer is teammate")
-            self.teammates[peer.key.key_to_bin().hex()] = PeerInfo(peer)
+            self.teammates[peer.public_key.key_to_bin().hex()] = PeerInfo(peer)
             if self.group_id:
                 self.distribute_group_id(self.group_id)
 
-        if peer.key.key_to_bin().hex() == SERVER_PUBLIC_KEY:
+        if peer.public_key.key_to_bin().hex() == SERVER_PUBLIC_KEY:
             print("Peer is server")
             self.server = peer
             self.run_part_1()
 
     def on_peer_removed(self, peer: Peer) -> None:
         print(f"Peer removed: {peer}")
-        if peer.key.key_to_bin().hex() in self.teammates:
-            self.teammates[peer.key.key_to_bin().hex()] = None
+        if peer.public_key.key_to_bin().hex() in self.teammates:
+            self.teammates[peer.public_key.key_to_bin().hex()] = None
 
-        if peer.key.key_to_bin().hex() == SERVER_PUBLIC_KEY:
+        if peer.public_key.key_to_bin().hex() == SERVER_PUBLIC_KEY:
             self.server = None
 
     def is_server(self, peer):
         return self.server and peer == self.server
 
     def is_teammate(self, peer):
-        return peer.key.key_to_bin().hex() in self.teammates.keys()
+        return peer.public_key.key_to_bin().hex() in self.teammates.keys()
 
     def is_teammate_with_id(self, peer, id):
         try:
-            return self.team_keys.index(peer.key) == id
+            return self.team_keys.index(peer.public_key) == id
         except ValueError:
             return False
 
@@ -332,7 +332,7 @@ class Lab2Community(Community, PeerObserver):
         Sends the challenge to all teammates. The challenge is cached to handle implicit NACKs.
         """
         self.cached_challenge = challenge
-        submitter = self.teammates[self.get_round_submitter_peer().key.key_to_bin().hex()]
+        submitter = self.teammates[self.get_round_submitter_peer().public_key.key_to_bin().hex()]
         f = lambda: self.distribute_challenge_impl(challenge, submitter)
         self.do_until(f, submitter, ChallengeNotificationAck)
 
@@ -353,7 +353,7 @@ class Lab2Community(Community, PeerObserver):
         self.ez_send(peer, ChallengeNotification(challenge.nonce, challenge.round_number, challenge.deadline, signature))
 
     def sign(self, nonce: bytes) -> bytes:
-        return self.my_peer.key.sign(nonce)
+        return self.my_peer.public_key.sign(nonce)
 
     def resend_challenge_to(self, peer: Peer) -> None:
         """
@@ -372,7 +372,7 @@ class Lab2Community(Community, PeerObserver):
         self.do_until(f, submitter, expected_message)
 
     async def do_until(self, f, peer: Peer, message_type: type, skip_first: bool = False) -> None:
-        mate = self.teammates[peer.key.key_to_bin().hex()]
+        mate = self.teammates[peer.public_key.key_to_bin().hex()]
         assert mate.waiting_for == None, "teammate is already waiting for another response"
         mate.waiting_for = message_type
 
@@ -429,11 +429,11 @@ class Lab2Community(Community, PeerObserver):
             print(f"Ignoring invalid ready notification from {peer}")
             return
 
-        if self.teammates[peer.key.key_to_bin().hex()].ready:
+        if self.teammates[peer.public_key.key_to_bin().hex()].ready:
             # we've already received a ready, so we interpret this as an implicit NACK
             self.resend_challenge_to(peer)
         else:
-            self.teammates[peer.key.key_to_bin().hex()].ready = True
+            self.teammates[peer.public_key.key_to_bin().hex()].ready = True
             self.try_part_2()
 
     @lazy_wrapper(ChallengeResponse)
@@ -471,7 +471,7 @@ class Lab2Community(Community, PeerObserver):
         if not self.is_teammate(peer):
             print(f"Ignoring invalid challenge notification ack from {peer}")
             return
-        self.teammates[peer.key.key_to_bin().hex()].sent_challenge_ack = True
+        self.teammates[peer.public_key.key_to_bin().hex()].sent_challenge_ack = True
         self.try_ack(peer, ChallengeNotificationAck)
 
     @lazy_wrapper(SignatureNotification)
