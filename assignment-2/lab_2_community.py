@@ -174,6 +174,10 @@ class Lab2Community(Community, PeerObserver):
         if not self.is_team_ready():
             return
 
+        asyncio.ensure_future(self.run_part_2())
+
+    async def run_part_2(self):
+        await asyncio.sleep(3)
         self.request_challenge()
 
     def is_team_ready(self) -> bool:
