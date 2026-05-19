@@ -18,7 +18,7 @@ RESEND_TIMEOUT: float = 0.8
 
 # Probabilitity that an incoming packet should be dropped. Only applied to messages in Part 2.
 # Setting this to `None` corresponds to disabling the dropping behavior.
-DROP_PROBABILITY: float | None = 0.3
+DROP_PROBABILITY: float | None = None
 
 # We use @vp_compile rather than @dataclass, see assignment 1.
 @vp_compile
