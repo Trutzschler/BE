@@ -379,7 +379,7 @@ class Lab2Community(Community, PeerObserver):
         asyncio.ensure_future(self.do_until(f, submitter, expected_message))
 
     async def do_until(self, f, peer: PeerInfo, message_type: type, skip_first: bool = False) -> None:
-        assert peer.waiting_for == None, f"teammate is already waiting for another response: {peer}, trying to register {message_type}"
+        assert peer.waiting_for == None, f"teammate is already waiting for another response: {peer} (key: {peer.peer.public_key.key_to_bin().hex()}), trying to register {message_type}"
         peer.waiting_for = message_type
 
         if not skip_first:
@@ -400,7 +400,9 @@ class Lab2Community(Community, PeerObserver):
     def setup_challenge_retry(self, notification: ChallengeNotification) -> None:
         requester = self.get_round_requester_peer(notification.round_number)
         for peer in self.teammates.values():
-            if peer.peer != requester:
+            if peer.peer != requester and peer.signature == None:
+                # this peer is not the requester and it has not sent a signature yet, so we resend
+                # the challenge until it has sent a signature
                 f = lambda: self.retry_challenge(peer.peer, notification)
                 asyncio.ensure_future(self.do_until(f, peer, SignatureNotification, skip_first=True))
 
@@ -479,12 +481,13 @@ class Lab2Community(Community, PeerObserver):
 
         if self.get_round_submitter_index(notification.round_number) == self.own_index:
             self.ez_send(peer, ChallengeNotificationAck(notification.round_number))
-            self.submission_nonce = notification.nonce
-            # if we are the submitter for this round, we collect all signatures and try to submit
-            if len(notification.signature) > 0:
-                self.register_signature(peer, notification.signature)
-            self.setup_challenge_retry(notification)
-            self.try_submit()
+            if self.submission_nonce == None:
+                self.submission_nonce = notification.nonce
+                # if we are the submitter for this round, we collect all signatures and try to submit
+                if len(notification.signature) > 0:
+                    self.register_signature(peer, notification.signature)
+                self.setup_challenge_retry(notification)
+                self.try_submit()
         else:
             # if we are not the submitter for this round, sign the nonce and send the signature to
             # the submitter
