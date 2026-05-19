@@ -5,12 +5,14 @@ from ipv8.messaging.payload_dataclass import DataClassPayload, VariablePayload, 
 from ipv8.community import Community, CommunitySettings
 from ipv8.lazy_community import Peer, lazy_wrapper
 
-#from common import SERVER_PUBLIC_KEY
 SERVER_PUBLIC_KEY = bytes.fromhex("4c69624e61434c504b3a86b23934a28d669c390e2d1fc0b0870706c4591cc0cb178bc5a811da6d87d27ef319b2638ef60cc8d119724f4c53a1ebfad919c3ac4136c501ce5c09364e0ebb")
 
 COMMUNITY_ID = bytes.fromhex("2c1cc6e35ff484f99ebdfb6108477783c0102881")
 
 ROUNDS = 3
+
+# Timeout after which to resend a message if not implicit ACK was received.
+RESEND_TIMEOUT = 1
 
 # We use @vp_compile rather than @dataclass, see assignment 1.
 @vp_compile
@@ -68,6 +70,12 @@ class ChallengeNotification(VariablePayload):
     names = ["nonce", "round_number", "deadline", "signature"]
 
 @vp_compile
+class ChallengeNotificationAck(VariablePayload):
+    msg_id = 15
+    format_list = ["q"]
+    names = ["round_number"]
+
+@vp_compile
 class SignatureNotification(VariablePayload):
     msg_id = 13
     format_list = ["round_number", "varlenH"]
@@ -83,8 +91,10 @@ class DoneNotification(VariablePayload):
 class PeerInfo:
     peer: Peer
     ready: bool = False
+    sent_challenge_ack: bool = False
     sent_group_id: bool = False # whether original peer has sent group id to this peer
     signature: bytes | None = None # signature for the round the original peer requested
+    waiting_for: type | None = None # message type of response for which original peer is waiting
 
 class Lab2Community(Community):
     community_id = COMMUNITY_ID
@@ -301,6 +311,11 @@ class Lab2Community(Community):
         Sends the challenge to all teammates. The challenge is cached to handle implicit NACKs.
         """
         self.cached_challenge = challenge
+        submitter = self.teammates[self.get_round_submitter_peer().key.key_to_bin()]
+        f = lambda: self.distribute_challenge_impl(challenge, submitter)
+        self.do_until(f, submitter, ChallengeNotificationAck)
+
+    def distribute_challenge_impl(self, challenge: ChallengeResponse) -> None:
         for mate in self.teammates:
             self.send_challenge_to(challenge, mate.peer)
 
@@ -313,6 +328,7 @@ class Lab2Community(Community):
             signature = self.sign(challenge.nonce)
         else:
             signature = b""
+
         self.ez_send(peer, ChallengeNotification(challenge.nonce, challenge.round_number, challenge.deadline, signature))
 
     def sign(self, nonce: bytes) -> bytes:
@@ -324,6 +340,44 @@ class Lab2Community(Community):
         """
         if self.cached_challenge:
             self.send_challenge_to(self.cached_challenge, peer)
+
+    def send_signature(self, submitter: Peer, round_number: int, signature: bytes):
+        f = lambda: self.ez_send(submitter, SignatureNotification(round_number, signature))
+
+        if round_number == ROUNDS:
+            expected_message = DoneNotification
+        else:
+            expected_message = ChallengeNotification
+        self.do_until(f, submitter, expected_message)
+
+    async def do_until(self, f, peer: Peer, message_type: type, skip_first: bool = False) -> None:
+        mate = self.teammates[peer.key.key_to_bin()]
+        assert mate.waiting_for == None, "teammate is already waiting for another response"
+        mate.waiting_for = message_type
+
+        if not skip_first:
+            f()
+
+        while mate.waiting_for:
+            await asyncio.sleep(RESEND_TIMEOUT)
+            f()
+
+    def try_ack(self, peer: Peer, message_type: type) -> None:
+        """
+        Try to interpret received message as an implicit ACK.
+        """
+        if self.waiting_for == (peer, message_type):
+            self.waiting_for = None
+
+    def setup_challenge_retry(self, notification: ChallengeNotification) -> None:
+        requester = self.get_round_requester_peer(notification.round_number)
+        for peer in self.teammates.values():
+            if peer != requester:
+                f = lambda: self.retry_challenge(peer.peer, notification)
+                self.do_until(f, peer, SignatureNotification, skip_first=True)
+
+    def retry_challenge(self, peer: Peer, notification: ChallengeNotification) -> None:
+        self.ez_send(peer, notification)
 
     @lazy_wrapper(RegisterResponse)
     def on_register_response(self, peer: Peer, response: RegisterResponse) -> None:
@@ -371,21 +425,33 @@ class Lab2Community(Community):
 
     @lazy_wrapper(ChallengeNotification)
     def on_challenge_notification(self, peer: Peer, notification: ChallengeNotification):
-        if peer != self.get_round_requester_peer(notification.round_number):
+        if peer not in [self.get_round_requester_peer(notification.round_number), self.get_round_submitter_peer(notification.round_number)]:
             print(f"Ignoring invalid challenge notification from {peer}")
             return
 
+        self.try_ack(peer, ChallengeNotification)
+
         if self.get_round_submitter_index() == self.own_index:
+            self.ez_send(peer, ChallengeNotificationAck())
             # if we are the submitter for this round, we collect all signatures and try to submit
             if len(notification.signature) > 0:
                 self.register_signature(peer, signature)
+            self.setup_challenge_retry(notification)
             self.try_submit()
         else:
             # if we are not the submitter for this round, sign the nonce and send the signature to
             # the submitter
             signature = self.sign(notification.nonce)
             submitter_peer = self.get_round_submitter_peer(notification.round_number)
-            self.ez_send(submitter_peer, SignatureNotification(notification.round_number, signature))
+            self.send_signature(submitter_peer, notification.round_number, signature)
+
+    @lazy_wrapper(ChallengeNotificationAck)
+    def on_challenge_notification_ack(self, peer: Peer, ack: ChallengeNotificationAck):
+        if not self.is_teammate(peer):
+            print(f"Ignoring invalid challenge notification ack from {peer}")
+            return
+        self.teammates[peer.key.key_to_bin()].sent_challenge_ack = True
+        self.try_ack(peer, ChallengeNotificationAck)
 
     @lazy_wrapper(SignatureNotification)
     def on_signature_notification(self, peer: Peer, notification: SignatureNotification):
@@ -407,7 +473,7 @@ class Lab2Community(Community):
 
         print(f"Round result: {result}")
         if not result.success:
-            self.abort("Unsuccessful round")
+            self.abort(f"Unsuccessful round: {result}")
             return
 
         if result.rounds_completed == ROUNDS:
@@ -420,6 +486,8 @@ class Lab2Community(Community):
         if not self.is_teammate(peer):
             print(f"Ignoring invalid done notification from {peer}")
             return
+
+        self.try_ack(peer, DoneNotification)
 
         print(f"Done notification: {notification}")
         self.done_future.set_result(notification)
