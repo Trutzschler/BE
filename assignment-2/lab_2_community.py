@@ -114,8 +114,7 @@ class Lab2Community(Community):
         self.submission_round: int | None = None # the round for which this peer submits the challenge
         self.cached_challenge: ChallengeResponse | None = None
 
-    def configure(self, server_key: str, group_id: str | None, teammates: list[bytes]) -> None:
-        self.server_key = server_key
+    def configure(self, group_id: str | None, teammates: list[bytes]) -> None:
         for key in teammates:
             self.teammates[key] = None
         self.group_id = group_id
@@ -237,7 +236,7 @@ class Lab2Community(Community):
             self.teammates[peer.mid.hex()] = PeerInfo(peer)
             self.distribute_group_id()
 
-        if peer.key.hex() == self.server_key:
+        if peer.key.hex() == SERVER_PUBLIC_KEY:
             self.server = peer
 
     def on_peer_removed(self, peer: Peer) -> None:

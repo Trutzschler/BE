@@ -13,7 +13,7 @@ from lab_2_community import Lab2Community
 
 TIMEOUT = 15
 
-async def run_client(email: str, github_url: str, key_file: str, nonce: bytes) -> None:
+async def run_client(group_id: str | None, teammates: list[bytes], key_file: str) -> None:
     builder = ConfigBuilder().clear_keys().clear_overlays()
     builder.add_key("client", "curve25519", key_file)
     builder.add_overlay(
@@ -34,7 +34,7 @@ async def run_client(email: str, github_url: str, key_file: str, nonce: bytes) -
     print(f"Peer mid: {overlay.my_peer.mid.hex()}")
     # print(f"Server pubkey: {SERVER_PUBLIC_KEY.hex()}")
     print("Joining community and waiting for the server to be discovered...")
-    overlay.configure(email, github_url, nonce)
+    overlay.configure(group_id, teammates)
 
     try:
         result = await asyncio.wait_for(
@@ -58,10 +58,13 @@ def require_env(key: str) -> str:
 
 def main() -> None:
     load_dotenv()
+    group_id = os.environ.get("GROUP_ID")
     teammates = require_env("TEAMMATES")
     key_file = require_env("KEY_FILE")
 
-    asyncio.run(run_client(email, github_url, key_file, nonce))
+    teammates = [bytes.fromhex(s.strip()) for s in teammates.split(",")]
+
+    asyncio.run(run_client(group_id, teammates, key_file))
 
 if __name__ == "__main__":
     main()
