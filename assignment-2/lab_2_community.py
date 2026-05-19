@@ -363,8 +363,8 @@ class Lab2Community(Community, PeerObserver):
         if self.cached_challenge:
             self.send_challenge_to(self.cached_challenge, peer)
 
-    def send_signature(self, submitter: Peer, round_number: int, signature: bytes):
-        f = lambda: self.ez_send(submitter, SignatureNotification(round_number, signature))
+    def send_signature(self, submitter: PeerInfo, round_number: int, signature: bytes):
+        f = lambda: self.ez_send(submitter.peer, SignatureNotification(round_number, signature))
 
         if round_number == ROUNDS:
             expected_message = DoneNotification
@@ -372,15 +372,14 @@ class Lab2Community(Community, PeerObserver):
             expected_message = ChallengeNotification
         asyncio.ensure_future(self.do_until(f, submitter, expected_message))
 
-    async def do_until(self, f, peer: Peer, message_type: type, skip_first: bool = False) -> None:
-        mate = self.teammates[peer.public_key.key_to_bin()]
-        assert mate.waiting_for == None, "teammate is already waiting for another response"
-        mate.waiting_for = message_type
+    async def do_until(self, f, peer: PeerInfo, message_type: type, skip_first: bool = False) -> None:
+        assert peer.waiting_for == None, "teammate is already waiting for another response"
+        peer.waiting_for = message_type
 
         if not skip_first:
             f()
 
-        while mate.waiting_for:
+        while peer.waiting_for:
             await asyncio.sleep(RESEND_TIMEOUT)
             f()
 
@@ -474,7 +473,8 @@ class Lab2Community(Community, PeerObserver):
             # the submitter
             signature = self.sign(notification.nonce)
             submitter_peer = self.get_round_submitter_peer(notification.round_number)
-            self.send_signature(submitter_peer, notification.round_number, signature)
+            submitter = self.teammates[submitter_peer.public_key.key_to_bin()]
+            self.send_signature(submitter, notification.round_number, signature)
 
     @lazy_wrapper(ChallengeNotificationAck)
     def on_challenge_notification_ack(self, peer: Peer, ack: ChallengeNotificationAck):
