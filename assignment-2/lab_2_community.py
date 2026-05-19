@@ -463,6 +463,7 @@ class Lab2Community(Community, PeerObserver):
 
         if self.get_round_submitter_index(notification.round_number) == self.own_index:
             self.ez_send(peer, ChallengeNotificationAck(notification.round_number))
+            self.submission_nonce = notification.nonce
             # if we are the submitter for this round, we collect all signatures and try to submit
             if len(notification.signature) > 0:
                 self.register_signature(peer, notification.signature)
