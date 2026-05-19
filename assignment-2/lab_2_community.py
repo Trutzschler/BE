@@ -1,9 +1,10 @@
 import asyncio
 from dataclasses import dataclass
 
-from ipv8.messaging.payload_dataclass import DataClassPayload, VariablePayload, vp_compile
+from ipv8.messaging.payload_dataclass import VariablePayload, vp_compile
 from ipv8.community import Community, CommunitySettings
 from ipv8.lazy_community import Peer, lazy_wrapper
+from ipv8.peerdiscovery.network import PeerObserver
 
 SERVER_PUBLIC_KEY = bytes.fromhex("4c69624e61434c504b3a82e33614a342774e084af80835838d6dbdb64a537d3ddb6c1d82011a7f101553cda40cf5fa0e0fc23abd0a9c4f81322282c5b34566f6b8401f5f683031e60c96")
 
@@ -96,7 +97,7 @@ class PeerInfo:
     signature: bytes | None = None # signature for the round the original peer requested
     waiting_for: type | None = None # message type of response for which original peer is waiting
 
-class Lab2Community(Community):
+class Lab2Community(Community, PeerObserver):
     community_id = COMMUNITY_ID
 
     def __init__(self, settings: CommunitySettings) -> None:
@@ -133,6 +134,7 @@ class Lab2Community(Community):
         self.team_keys = sorted(list(self.teammates.keys()) + [self.my_peer.key])
         self.own_index = self.team_keys.index(self.my_peer.key)
         self.submission_round = self.get_submission_round_number()
+        self.network.add_peer_observer(self)
 
         self.run_part_1()
 
