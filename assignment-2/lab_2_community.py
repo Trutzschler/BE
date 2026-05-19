@@ -522,7 +522,7 @@ class Lab2Community(Community, PeerObserver):
             return
 
         if result.rounds_completed == ROUNDS:
-            self.finish("All rounds completed successfully")
+            self.finish(f"All rounds completed successfully. Last round result: {result}")
         else:
             self.request_challenge()
 
