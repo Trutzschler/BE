@@ -1,19 +1,24 @@
 import asyncio
 from dataclasses import dataclass
+import random
 
 from ipv8.messaging.payload_dataclass import VariablePayload, vp_compile
 from ipv8.community import Community, CommunitySettings
 from ipv8.lazy_community import Peer, lazy_wrapper
 from ipv8.peerdiscovery.network import PeerObserver
 
-SERVER_PUBLIC_KEY = bytes.fromhex("4c69624e61434c504b3a82e33614a342774e084af80835838d6dbdb64a537d3ddb6c1d82011a7f101553cda40cf5fa0e0fc23abd0a9c4f81322282c5b34566f6b8401f5f683031e60c96")
+SERVER_PUBLIC_KEY: bytes = bytes.fromhex("4c69624e61434c504b3a82e33614a342774e084af80835838d6dbdb64a537d3ddb6c1d82011a7f101553cda40cf5fa0e0fc23abd0a9c4f81322282c5b34566f6b8401f5f683031e60c96")
 
-COMMUNITY_ID = bytes.fromhex("4c61623247726f75705369676e696e6732303236")
+COMMUNITY_ID: bytes = bytes.fromhex("4c61623247726f75705369676e696e6732303236")
 
-ROUNDS = 3
+ROUNDS: int = 3
 
 # Timeout after which to resend a message if not implicit ACK was received.
-RESEND_TIMEOUT = 3
+RESEND_TIMEOUT: float = 3
+
+# Probabilitity that an incoming packet should be dropped. Only applied to messages in Part 2.
+# Setting this to `None` corresponds to disabling the dropping behavior.
+DROP_PROBABILITY: float | None = 0.5
 
 # We use @vp_compile rather than @dataclass, see assignment 1.
 @vp_compile
@@ -418,6 +423,12 @@ class Lab2Community(Community, PeerObserver):
             self.sent_ready_response = True
             self.ez_send(peer_0, ReadyResponse())
 
+    def should_drop(self) -> bool:
+        """
+        Determines at random whether the packet should be dropped.
+        """
+        return random.random() <= DROP_PROBABILITY
+
     @lazy_wrapper(RegisterResponse)
     def on_register_response(self, peer: Peer, response: RegisterResponse) -> None:
         if self.own_index != 0 or not self.is_server(peer):
@@ -461,6 +472,8 @@ class Lab2Community(Community, PeerObserver):
 
     @lazy_wrapper(ChallengeResponse)
     def on_challenge_response(self, peer: Peer, response: ChallengeResponse) -> None:
+        if self.should_drop():
+            return
         if not self.is_server(peer):
             print(f"Ignoring invalid challenge response from {peer}")
             return
@@ -471,6 +484,8 @@ class Lab2Community(Community, PeerObserver):
 
     @lazy_wrapper(ChallengeNotification)
     def on_challenge_notification(self, peer: Peer, notification: ChallengeNotification):
+        if self.should_drop():
+            return
         if peer not in [self.get_round_requester_peer(notification.round_number), self.get_round_submitter_peer(notification.round_number)]:
             print(f"Ignoring invalid challenge notification from {peer}")
             return
@@ -498,6 +513,8 @@ class Lab2Community(Community, PeerObserver):
 
     @lazy_wrapper(ChallengeNotificationAck)
     def on_challenge_notification_ack(self, peer: Peer, ack: ChallengeNotificationAck):
+        if self.should_drop():
+            return
         if not self.is_teammate(peer):
             print(f"Ignoring invalid challenge notification ack from {peer}")
             return
@@ -509,6 +526,8 @@ class Lab2Community(Community, PeerObserver):
 
     @lazy_wrapper(SignatureNotification)
     def on_signature_notification(self, peer: Peer, notification: SignatureNotification):
+        if self.should_drop():
+            return
         if not self.is_teammate(peer):
             print(f"Ignoring invalid signature notification from {peer}")
             return
@@ -524,6 +543,8 @@ class Lab2Community(Community, PeerObserver):
 
     @lazy_wrapper(RoundResult)
     def on_round_result(self, peer: Peer, result: RoundResult) -> None:
+        if self.should_drop():
+            return
         if not self.is_server(peer):
             print(f"Ignoring invalid round result from {peer}")
             return
@@ -542,6 +563,8 @@ class Lab2Community(Community, PeerObserver):
 
     @lazy_wrapper(DoneNotification)
     def on_done_notification(self, peer: Peer, notification: DoneNotification) -> None:
+        if self.should_drop():
+            return
         if not self.is_teammate(peer):
             print(f"Ignoring invalid done notification from {peer}")
             return
