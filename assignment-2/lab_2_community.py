@@ -117,7 +117,6 @@ class Lab2Community(Community, PeerObserver):
         self.team_keys: list[bytes] | None = None
         self.own_index: int | None = None
         self.done_future: asyncio.Future | None = None
-        self.request_nonce: bytes | None = None # nonce for challenge requested by this peer
         self.submission_nonce: bytes | None = None # nonce for challenge submitted by this peer
         self.submission_round: int | None = None # the round for which this peer submits the challenge
         self.cached_challenge: ChallengeResponse | None = None
@@ -374,7 +373,7 @@ class Lab2Community(Community, PeerObserver):
         asyncio.ensure_future(self.do_until(f, submitter, expected_message))
 
     async def do_until(self, f, peer: PeerInfo, message_type: type, skip_first: bool = False) -> None:
-        assert peer.waiting_for == None, "teammate is already waiting for another response"
+        assert peer.waiting_for == None, f"teammate is already waiting for another response: {peer}"
         peer.waiting_for = message_type
 
         if not skip_first:
@@ -389,7 +388,7 @@ class Lab2Community(Community, PeerObserver):
         Try to interpret received message as an implicit ACK.
         """
         mate = self.teammates[peer.public_key.key_to_bin()]
-        if mate.waiting_for == (peer, message_type):
+        if mate.waiting_for == message_type:
             mate.waiting_for = None
 
     def setup_challenge_retry(self, notification: ChallengeNotification) -> None:
