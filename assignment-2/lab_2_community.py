@@ -118,9 +118,11 @@ class Lab2Community(Community):
         for key in teammates:
             self.teammates[key] = None
         self.group_id = group_id
+        self.done_future = asyncio.get_running_loop().create_future()
+
 
     def started(self) -> None:
-        self.team_keys = sorted(self.teammates.keys() + [self.my_peer.key])
+        self.team_keys = sorted(list(self.teammates.keys()) + [self.my_peer.key])
         self.own_index = self.team_keys.index(self.my_peer.key)
         self.submission_round = self.get_submission_round_number()
 
