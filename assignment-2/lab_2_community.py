@@ -14,7 +14,7 @@ COMMUNITY_ID: bytes = bytes.fromhex("4c61623247726f75705369676e696e6732303236")
 ROUNDS: int = 3
 
 # Timeout after which to resend a message if not implicit ACK was received.
-RESEND_TIMEOUT: float = 3
+RESEND_TIMEOUT: float = 0.8
 
 # Probabilitity that an incoming packet should be dropped. Only applied to messages in Part 2.
 # Setting this to `None` corresponds to disabling the dropping behavior.
@@ -384,7 +384,7 @@ class Lab2Community(Community, PeerObserver):
         asyncio.ensure_future(self.do_until(f, submitter, expected_message))
 
     async def do_until(self, f, peer: PeerInfo, message_type: type, skip_first: bool = False) -> None:
-        assert peer.waiting_for == None, f"teammate is already waiting for another response: {peer} (key: {peer.peer.public_key.key_to_bin().hex()}), trying to register {message_type}"
+        assert peer.waiting_for == None or peer.waiting_for == message_type, f"teammate is already waiting for another response: {peer} (key: {peer.peer.public_key.key_to_bin().hex()}), trying to register {message_type}"
         peer.waiting_for = message_type
 
         if not skip_first:
@@ -427,7 +427,7 @@ class Lab2Community(Community, PeerObserver):
         """
         Determines at random whether the packet should be dropped.
         """
-        return random.random() <= DROP_PROBABILITY
+        return DROP_PROBABILITY and random.random() <= DROP_PROBABILITY
 
     @lazy_wrapper(RegisterResponse)
     def on_register_response(self, peer: Peer, response: RegisterResponse) -> None:
