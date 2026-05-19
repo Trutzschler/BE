@@ -354,7 +354,7 @@ class Lab2Community(Community, PeerObserver):
         self.ez_send(peer, ChallengeNotification(challenge.nonce, challenge.round_number, challenge.deadline, signature))
 
     def sign(self, nonce: bytes) -> bytes:
-        return self.my_peer.key.sign(nonce)
+        return self.my_peer.key.signature(nonce)
 
     def resend_challenge_to(self, peer: Peer) -> None:
         """
