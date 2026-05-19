@@ -180,7 +180,7 @@ class Lab2Community(Community, PeerObserver):
         """
         Returns whether all teamates are ready for part 2.
         """
-        return all(map(lambda p: p.ready, self.teammates.values()))
+        return all(map(lambda p: p and p.ready, self.teammates.values()))
 
     def stop(self, success: bool, message: str) -> None:
         """
