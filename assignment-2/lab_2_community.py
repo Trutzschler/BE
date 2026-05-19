@@ -18,7 +18,7 @@ RESEND_TIMEOUT: float = 0.8
 
 # Probabilitity that an incoming packet should be dropped. Only applied to messages in Part 2.
 # Setting this to `None` corresponds to disabling the dropping behavior.
-DROP_PROBABILITY: float | None = 0.5
+DROP_PROBABILITY: float | None = 0.3
 
 # We use @vp_compile rather than @dataclass, see assignment 1.
 @vp_compile
@@ -264,13 +264,13 @@ class Lab2Community(Community, PeerObserver):
             if self.group_id and self.own_index == 0:
                 self.distribute_group_id()
 
-            if self.own_index != 0:
-                self.try_send_ready_response()
-
         if peer.public_key.key_to_bin() == SERVER_PUBLIC_KEY:
             print("Peer is server")
             self.server = peer
             self.run_part_1()
+
+        if self.own_index != 0:
+            self.try_send_ready_response()
 
     def on_peer_removed(self, peer: Peer) -> None:
         print(f"Peer removed: {peer}")
@@ -418,7 +418,7 @@ class Lab2Community(Community, PeerObserver):
         return all(map(lambda p: p, self.teammates.values()))
 
     def try_send_ready_response(self) -> None:
-        if self.received_ready_request and not self.sent_ready_response and self.all_peers_discovered():
+        if self.received_ready_request and not self.sent_ready_response and self.all_peers_discovered() and self.server:
             peer_0 = self.teammates[self.team_keys[0]].peer
             self.sent_ready_response = True
             self.ez_send(peer_0, ReadyResponse())
