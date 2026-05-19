@@ -13,7 +13,7 @@ COMMUNITY_ID = bytes.fromhex("4c61623247726f75705369676e696e6732303236")
 ROUNDS = 3
 
 # Timeout after which to resend a message if not implicit ACK was received.
-RESEND_TIMEOUT = 1
+RESEND_TIMEOUT = 3
 
 # We use @vp_compile rather than @dataclass, see assignment 1.
 @vp_compile
@@ -222,6 +222,7 @@ class Lab2Community(Community, PeerObserver):
             return
         signatures = self.generate_group_signature()
         submission = BundleSubmission(self.group_id, self.submission_round, *signatures)
+        print(f"Submitting {submission}")
         self.ez_send(self.server, submission)
 
     def all_signatures_ready(self):
