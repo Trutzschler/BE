@@ -37,12 +37,12 @@ async def run_client(email: str, github_url: str, key_file: str, nonce: bytes) -
     overlay.configure(email, github_url, nonce)
 
     try:
-        done = await asyncio.wait_for(
+        result = await asyncio.wait_for(
             overlay.done_future,
             timeout=TIMEOUT,
         )
 
-        print(f"Done")
+        print(f"Done: {result}")
 
     except asyncio.TimeoutError:
         print(f"Still running after {TIMEOUT:.0f}s. ")
