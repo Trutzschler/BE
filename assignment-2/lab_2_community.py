@@ -78,7 +78,7 @@ class ChallengeNotificationAck(VariablePayload):
 @vp_compile
 class SignatureNotification(VariablePayload):
     msg_id = 13
-    format_list = ["round_number", "varlenH"]
+    format_list = ["q", "varlenH"]
     names = ["round_number", "signature"]
 
 @vp_compile
@@ -102,6 +102,14 @@ class Lab2Community(Community):
     def __init__(self, settings: CommunitySettings) -> None:
         super().__init__(settings)
         self.add_message_handler(RegisterResponse, self.on_register_response)
+        self.add_message_handler(RoundResult, self.on_round_result)
+        self.add_message_handler(ReadyRequest, self.on_ready_request)
+        self.add_message_handler(ReadyResponse, self.on_ready_response)
+        self.add_message_handler(ChallengeResponse, self.on_challenge_response)
+        self.add_message_handler(ChallengeNotification, self.on_challenge_notification)
+        self.add_message_handler(ChallengeNotificationAck, self.on_challenge_notification_ack)
+        self.add_message_handler(SignatureNotification, self.on_signature_notification)
+        self.add_message_handler(DoneNotification, self.on_done_notification)
         self.group_id: str | None = None
         self.server_key: str | None = None
         self.server: Peer | None = None
@@ -483,7 +491,7 @@ class Lab2Community(Community):
             self.request_challenge()
 
     @lazy_wrapper(DoneNotification)
-    def on_round_result(self, peer: Peer, notification: DoneNotification) -> None:
+    def on_done_notification(self, peer: Peer, notification: DoneNotification) -> None:
         if not self.is_teammate(peer):
             print(f"Ignoring invalid done notification from {peer}")
             return
