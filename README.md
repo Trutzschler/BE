@@ -10,3 +10,5 @@ following (see `.env.sample`):
 - `GITHUB_URL`: included in the submission message.
 - `KEY_FILE`: path to store the private key (`.pem` file) for this client.
 - `PRECOMPUTED_NONCE` (optional): precomputed nonce to avoid mining when re-running the code.
+
+## Assignment 2

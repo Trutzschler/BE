@@ -48,7 +48,6 @@ class Lab1Community(Community):
         self.github_url: str = ""
         self.nonce: int = 0
         self.response_future: asyncio.Future | None = None
-        self._submitted_to: set[bytes] = set()
         asyncio.ensure_future(self._run())
 
     def configure(self, email: str, github_url: str, nonce: int) -> None:
