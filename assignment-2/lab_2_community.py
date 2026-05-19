@@ -378,7 +378,7 @@ class Lab2Community(Community, PeerObserver):
         asyncio.ensure_future(self.do_until(f, submitter, expected_message))
 
     async def do_until(self, f, peer: PeerInfo, message_type: type, skip_first: bool = False) -> None:
-        assert peer.waiting_for == None, f"teammate is already waiting for another response: {peer}"
+        assert peer.waiting_for == None, f"teammate is already waiting for another response: {peer}, trying to register {message_type}"
         peer.waiting_for = message_type
 
         if not skip_first:
@@ -500,6 +500,7 @@ class Lab2Community(Community, PeerObserver):
             return
 
         print(f"Received signature notification from {peer}: {notification}")
+        self.try_ack(peer, SignatureNotification)
 
         if self.get_round_submitter_index(notification.round_number) == self.own_index:
             self.register_signature(peer, notification.signature)
