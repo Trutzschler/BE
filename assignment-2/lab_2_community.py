@@ -120,6 +120,8 @@ class Lab2Community(Community, PeerObserver):
         self.submission_nonce: bytes | None = None # nonce for challenge submitted by this peer
         self.submission_round: int | None = None # the round for which this peer submits the challenge
         self.cached_challenge: ChallengeResponse | None = None
+        self.received_ready_request: bool = False
+        self.sent_ready_response: bool = False
 
     def configure(self, group_id: str | None, teammates: list[bytes]) -> None:
         for key in teammates:
@@ -174,10 +176,6 @@ class Lab2Community(Community, PeerObserver):
         if not self.is_team_ready():
             return
 
-        asyncio.ensure_future(self.run_part_2())
-
-    async def run_part_2(self):
-        await asyncio.sleep(3)
         self.request_challenge()
 
     def is_team_ready(self) -> bool:
@@ -260,6 +258,9 @@ class Lab2Community(Community, PeerObserver):
             self.teammates[peer.public_key.key_to_bin()] = PeerInfo(peer)
             if self.group_id and self.own_index == 0:
                 self.distribute_group_id()
+
+            if self.own_index != 0:
+                self.try_send_ready_response()
 
         if peer.public_key.key_to_bin() == SERVER_PUBLIC_KEY:
             print("Peer is server")
@@ -406,6 +407,15 @@ class Lab2Community(Community, PeerObserver):
     def retry_challenge(self, peer: Peer, notification: ChallengeNotification) -> None:
         self.ez_send(peer, notification)
 
+    def all_peers_discovered(self) -> bool:
+        return all(map(lambda p: p, self.teammates.values()))
+
+    def try_send_ready_response(self) -> None:
+        if self.received_ready_request and not self.sent_ready_response and self.all_peers_discovered():
+            peer_0 = self.teammates[self.team_keys[0]].peer
+            self.sent_ready_response = True
+            self.ez_send(peer_0, ReadyResponse())
+
     @lazy_wrapper(RegisterResponse)
     def on_register_response(self, peer: Peer, response: RegisterResponse) -> None:
         if self.own_index != 0 or not self.is_server(peer):
@@ -429,7 +439,8 @@ class Lab2Community(Community, PeerObserver):
         print(f"Received ready request from {peer}: {request}")
 
         self.group_id = request.group_id
-        self.ez_send(peer, ReadyResponse())
+        self.received_ready_request = True
+        self.try_send_ready_response()
 
     @lazy_wrapper(ReadyResponse)
     def on_ready_response(self, peer: Peer, response: ReadyResponse) -> None:
