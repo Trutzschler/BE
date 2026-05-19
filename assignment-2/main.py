@@ -62,7 +62,7 @@ def main() -> None:
     teammates = require_env("TEAMMATES")
     key_file = require_env("KEY_FILE")
 
-    teammates = [s.strip() for s in teammates.split(",")]
+    teammates = [bytes.fromhex(s.strip()) for s in teammates.split(",")]
 
     asyncio.run(run_client(group_id, teammates, key_file))
 
