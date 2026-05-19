@@ -253,7 +253,7 @@ class Lab2Community(Community, PeerObserver):
         if peer.public_key.key_to_bin() in self.teammates:
             print("Peer is teammate")
             self.teammates[peer.public_key.key_to_bin()] = PeerInfo(peer)
-            if self.group_id:
+            if self.group_id and self.own_index == 0:
                 self.distribute_group_id()
 
         if peer.public_key.key_to_bin() == SERVER_PUBLIC_KEY:
