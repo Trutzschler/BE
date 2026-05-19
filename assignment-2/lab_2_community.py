@@ -242,17 +242,17 @@ class Lab2Community(Community):
 
     def on_peer_added(self, peer: Peer) -> None:
         print(f"Peer added: {peer}")
-        if peer.mid.hex() in self.teammates:
-            self.teammates[peer.mid.hex()] = PeerInfo(peer)
+        if peer.key.key_to_bin() in self.teammates:
+            self.teammates[peer.key.key_to_bin()] = PeerInfo(peer)
             self.distribute_group_id()
 
-        if peer.key.hex() == SERVER_PUBLIC_KEY:
+        if peer.key.key_to_bin() == SERVER_PUBLIC_KEY:
             self.server = peer
 
     def on_peer_removed(self, peer: Peer) -> None:
         print(f"Peer removed: {peer}")
-        if peer.mid.hex() in self.teammates:
-            self.teammates[peer.mid.hex()] = None
+        if peer.key.key_to_bin() in self.teammates:
+            self.teammates[peer.key.key_to_bin()] = None
 
         if peer.key.hex() == self.server_key:
             self.server = None
