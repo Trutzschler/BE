@@ -28,13 +28,13 @@ async def run_client(group_id: str | None, teammates: list[bytes], key_file: str
         builder.finalize(),
         extra_communities={"Lab2Community": Lab2Community},
     )
-    await ipv8.start()
     overlay = ipv8.get_overlay(Lab2Community)
     print(f"Public key: {overlay.my_peer.public_key.key_to_bin().hex()}")
     print(f"Peer mid: {overlay.my_peer.mid.hex()}")
     # print(f"Server pubkey: {SERVER_PUBLIC_KEY.hex()}")
     print("Joining community and waiting for the server to be discovered...")
     overlay.configure(group_id, teammates)
+    await ipv8.start()
 
     try:
         result = await asyncio.wait_for(
