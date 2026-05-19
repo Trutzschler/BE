@@ -284,9 +284,10 @@ class Lab2Community(Community, PeerObserver):
 
     def get_submission_round_number(self) -> int:
         """
-        Returns the round number for which the current peer is responsible.
+        Returns the round number for which the current peer is responsible for submitting.
         """
-        return self.own_index + 1
+        # convert from zero-based indexing to one-based indexing
+        return 1 + (self.own_index - 1) % len(self.team_keys)
 
     def get_round_requester_index(self, round_number: int) -> int:
         """
