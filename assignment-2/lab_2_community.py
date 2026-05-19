@@ -434,7 +434,7 @@ class Lab2Community(Community):
             self.ez_send(peer, ChallengeNotificationAck())
             # if we are the submitter for this round, we collect all signatures and try to submit
             if len(notification.signature) > 0:
-                self.register_signature(peer, signature)
+                self.register_signature(peer, notification.signature)
             self.setup_challenge_retry(notification)
             self.try_submit()
         else:
