@@ -277,7 +277,7 @@ class Lab2Community(Community, PeerObserver):
 
     def is_teammate_with_id(self, peer, id):
         try:
-            return self.team_keys.index(peer.public_key) == id
+            return self.team_keys.index(peer.public_key.key_to_bin()) == id
         except ValueError:
             return False
 
