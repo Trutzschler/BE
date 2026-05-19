@@ -160,6 +160,7 @@ class Lab2Community(Community, PeerObserver):
         print(f"Distributing group id {self.group_id}")
         for mate in self.teammates.values():
             if mate and not mate.sent_group_id:
+                mate.sent_group_id = True
                 self.ez_send(mate.peer, ReadyRequest(self.group_id))
 
     def create_group(self) -> None:
