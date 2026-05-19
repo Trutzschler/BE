@@ -187,7 +187,7 @@ class Lab2Community(Community, PeerObserver):
         """
         Sends a done notification to all teammates.
         """
-        for mate in self.teammates().values():
+        for mate in self.teammates.values():
             if mate and mate.peer:
                 self.ez_send(mate.peer, DoneNotification(success, message))
 
@@ -239,7 +239,7 @@ class Lab2Community(Community, PeerObserver):
             else:
                 signature = self.teammates[key].signature
             signatures.append(signature)
-        return signature
+        return signatures
 
     def register_signature(self, peer: Peer, signature: bytes) -> None:
         """
@@ -333,12 +333,12 @@ class Lab2Community(Community, PeerObserver):
         Sends the challenge to all teammates. The challenge is cached to handle implicit NACKs.
         """
         self.cached_challenge = challenge
-        submitter = self.teammates[self.get_round_submitter_peer().public_key.key_to_bin()]
-        f = lambda: self.distribute_challenge_impl(challenge, submitter)
-        self.do_until(f, submitter, ChallengeNotificationAck)
+        submitter = self.teammates[self.get_round_submitter_peer(challenge.round_number).public_key.key_to_bin()]
+        f = lambda: self.distribute_challenge_impl(challenge)
+        asyncio.ensure_future(self.do_until(f, submitter, ChallengeNotificationAck))
 
     def distribute_challenge_impl(self, challenge: ChallengeResponse) -> None:
-        for mate in self.teammates:
+        for mate in self.teammates.values():
             self.send_challenge_to(challenge, mate.peer)
 
     def send_challenge_to(self, challenge: ChallengeResponse, peer: Peer) -> None:
@@ -354,7 +354,7 @@ class Lab2Community(Community, PeerObserver):
         self.ez_send(peer, ChallengeNotification(challenge.nonce, challenge.round_number, challenge.deadline, signature))
 
     def sign(self, nonce: bytes) -> bytes:
-        return self.my_peer.public_key.sign(nonce)
+        return self.my_peer.key.sign(nonce)
 
     def resend_challenge_to(self, peer: Peer) -> None:
         """
@@ -370,7 +370,7 @@ class Lab2Community(Community, PeerObserver):
             expected_message = DoneNotification
         else:
             expected_message = ChallengeNotification
-        self.do_until(f, submitter, expected_message)
+        asyncio.ensure_future(self.do_until(f, submitter, expected_message))
 
     async def do_until(self, f, peer: Peer, message_type: type, skip_first: bool = False) -> None:
         mate = self.teammates[peer.public_key.key_to_bin()]
@@ -388,15 +388,16 @@ class Lab2Community(Community, PeerObserver):
         """
         Try to interpret received message as an implicit ACK.
         """
-        if self.waiting_for == (peer, message_type):
-            self.waiting_for = None
+        mate = self.teammates[peer.public_key.key_to_bin()]
+        if mate.waiting_for == (peer, message_type):
+            mate.waiting_for = None
 
     def setup_challenge_retry(self, notification: ChallengeNotification) -> None:
         requester = self.get_round_requester_peer(notification.round_number)
         for peer in self.teammates.values():
-            if peer != requester:
+            if peer.peer != requester:
                 f = lambda: self.retry_challenge(peer.peer, notification)
-                self.do_until(f, peer, SignatureNotification, skip_first=True)
+                asyncio.ensure_future(self.do_until(f, peer, SignatureNotification, skip_first=True))
 
     def retry_challenge(self, peer: Peer, notification: ChallengeNotification) -> None:
         self.ez_send(peer, notification)
@@ -461,8 +462,8 @@ class Lab2Community(Community, PeerObserver):
 
         self.try_ack(peer, ChallengeNotification)
 
-        if self.get_round_submitter_index() == self.own_index:
-            self.ez_send(peer, ChallengeNotificationAck())
+        if self.get_round_submitter_index(notification.round_number) == self.own_index:
+            self.ez_send(peer, ChallengeNotificationAck(notification.round_number))
             # if we are the submitter for this round, we collect all signatures and try to submit
             if len(notification.signature) > 0:
                 self.register_signature(peer, notification.signature)
