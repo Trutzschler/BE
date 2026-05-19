@@ -472,8 +472,6 @@ class Lab2Community(Community, PeerObserver):
 
     @lazy_wrapper(ChallengeResponse)
     def on_challenge_response(self, peer: Peer, response: ChallengeResponse) -> None:
-        if self.should_drop():
-            return
         if not self.is_server(peer):
             print(f"Ignoring invalid challenge response from {peer}")
             return
@@ -543,8 +541,6 @@ class Lab2Community(Community, PeerObserver):
 
     @lazy_wrapper(RoundResult)
     def on_round_result(self, peer: Peer, result: RoundResult) -> None:
-        if self.should_drop():
-            return
         if not self.is_server(peer):
             print(f"Ignoring invalid round result from {peer}")
             return
