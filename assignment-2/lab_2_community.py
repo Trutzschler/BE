@@ -127,6 +127,7 @@ class Lab2Community(Community, PeerObserver):
         self.cached_challenge: ChallengeResponse | None = None
         self.received_ready_request: bool = False
         self.sent_ready_response: bool = False
+        self.round_result: RoundResult | None = None
 
     def configure(self, group_id: str | None, teammates: list[bytes]) -> None:
         for key in teammates:
@@ -221,6 +222,11 @@ class Lab2Community(Community, PeerObserver):
         """
         Try to submit the group signature to the server, if all teammates have sent their signature.
         """
+        # use cached round result, if it exists
+        if self.round_result:
+            self.handle_round_result(self.round_result)
+            return
+
         if not self.all_signatures_ready():
             return
         signatures = self.generate_group_signature()
@@ -429,6 +435,17 @@ class Lab2Community(Community, PeerObserver):
         """
         return DROP_PROBABILITY and random.random() <= DROP_PROBABILITY
 
+    def handle_round_result(self, result: RoundResult) -> None:
+        print(f"Round result: {result}")
+        if not result.success:
+            self.abort(f"Unsuccessful round: {result}")
+            return
+
+        if result.rounds_completed == ROUNDS:
+            self.finish(f"All rounds completed successfully. Last round result: {result}")
+        else:
+            self.request_challenge()
+
     @lazy_wrapper(RegisterResponse)
     def on_register_response(self, peer: Peer, response: RegisterResponse) -> None:
         if self.own_index != 0 or not self.is_server(peer):
@@ -546,16 +563,8 @@ class Lab2Community(Community, PeerObserver):
             return
 
         print(f"Received round result from {peer}: {result}")
-
-        print(f"Round result: {result}")
-        if not result.success:
-            self.abort(f"Unsuccessful round: {result}")
-            return
-
-        if result.rounds_completed == ROUNDS:
-            self.finish(f"All rounds completed successfully. Last round result: {result}")
-        else:
-            self.request_challenge()
+        self.round_result = result
+        self.handle_round_result(self.round_result)
 
     @lazy_wrapper(DoneNotification)
     def on_done_notification(self, peer: Peer, notification: DoneNotification) -> None:
