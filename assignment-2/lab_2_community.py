@@ -150,17 +150,17 @@ class Lab2Community(Community, PeerObserver):
 
     def obtain_group_id(self) -> None:
         if self.group_id:
-            self.distribute_group_id(self.group_id)
+            self.distribute_group_id()
         elif self.server:
             self.create_group()
         else:
             print("No server found yet")
 
-    def distribute_group_id(self, group_id: str) -> None:
-        print("Distributing group id {group_id}")
+    def distribute_group_id(self) -> None:
+        print(f"Distributing group id {self.group_id}")
         for mate in self.teammates.values():
-            if mate.peer and not mate.sent_group_id:
-                self.ez_send(mate.peer, ReadyRequest(group_id))
+            if mate and not mate.sent_group_id:
+                self.ez_send(mate.peer, ReadyRequest(self.group_id))
 
     def create_group(self) -> None:
         print(f"Creating group with keys {self.team_keys}")
@@ -254,7 +254,7 @@ class Lab2Community(Community, PeerObserver):
             print("Peer is teammate")
             self.teammates[peer.public_key.key_to_bin()] = PeerInfo(peer)
             if self.group_id:
-                self.distribute_group_id(self.group_id)
+                self.distribute_group_id()
 
         if peer.public_key.key_to_bin() == SERVER_PUBLIC_KEY:
             print("Peer is server")
