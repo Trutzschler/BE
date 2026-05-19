@@ -420,14 +420,18 @@ class Lab2Community(Community, PeerObserver):
             print(f"Ignoring ready request from invalid sender {peer}.")
             return
 
+        print(f"Received ready request from {peer}: {request}")
+
         self.group_id = request.group_id
         self.ez_send(peer, ReadyResponse())
 
     @lazy_wrapper(ReadyResponse)
-    def on_ready_response(self, peer: Peer, notification: ReadyResponse) -> None:
+    def on_ready_response(self, peer: Peer, response: ReadyResponse) -> None:
         if self.own_index != 0 or not self.is_teammate(peer):
-            print(f"Ignoring invalid ready notification from {peer}")
+            print(f"Ignoring invalid ready response from {peer}")
             return
+
+        print(f"Received ready response from {peer}: {response}")
 
         if self.teammates[peer.public_key.key_to_bin()].ready:
             # we've already received a ready, so we interpret this as an implicit NACK
@@ -442,6 +446,8 @@ class Lab2Community(Community, PeerObserver):
             print(f"Ignoring invalid challenge response from {peer}")
             return
 
+        print(f"Received challenge response from {peer}: {response}")
+
         self.distribute_challenge(response)
 
     @lazy_wrapper(ChallengeNotification)
@@ -449,6 +455,8 @@ class Lab2Community(Community, PeerObserver):
         if peer not in [self.get_round_requester_peer(notification.round_number), self.get_round_submitter_peer(notification.round_number)]:
             print(f"Ignoring invalid challenge notification from {peer}")
             return
+
+        print(f"Received challenge notification from {peer}: {notification}")
 
         self.try_ack(peer, ChallengeNotification)
 
@@ -471,6 +479,9 @@ class Lab2Community(Community, PeerObserver):
         if not self.is_teammate(peer):
             print(f"Ignoring invalid challenge notification ack from {peer}")
             return
+
+        print(f"Received challenge notification ack from {peer}: {ack}")
+
         self.teammates[peer.public_key.key_to_bin()].sent_challenge_ack = True
         self.try_ack(peer, ChallengeNotificationAck)
 
@@ -479,6 +490,8 @@ class Lab2Community(Community, PeerObserver):
         if not self.is_teammate(peer):
             print(f"Ignoring invalid signature notification from {peer}")
             return
+
+        print(f"Received signature notification from {peer}: {notification}")
 
         if self.get_round_submitter_index(notification.round_number) == self.own_index:
             self.register_signature(peer, notification.signature)
@@ -491,6 +504,8 @@ class Lab2Community(Community, PeerObserver):
         if not self.is_server(peer):
             print(f"Ignoring invalid round result from {peer}")
             return
+
+        print(f"Received round result from {peer}: {result}")
 
         print(f"Round result: {result}")
         if not result.success:
