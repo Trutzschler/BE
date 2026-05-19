@@ -7,7 +7,7 @@ from ipv8.lazy_community import Peer, lazy_wrapper
 
 SERVER_PUBLIC_KEY = bytes.fromhex("4c69624e61434c504b3a86b23934a28d669c390e2d1fc0b0870706c4591cc0cb178bc5a811da6d87d27ef319b2638ef60cc8d119724f4c53a1ebfad919c3ac4136c501ce5c09364e0ebb")
 
-COMMUNITY_ID = bytes.fromhex("2c1cc6e35ff484f99ebdfb6108477783c0102881")
+COMMUNITY_ID = bytes.fromhex("4c61623247726f75705369676e696e6732303236")
 
 ROUNDS = 3
 
