@@ -10,7 +10,7 @@ from ipv8.configuration import (
 )
 from ipv8_service import IPv8
 
-from lab3_community import RegistrationCommunity
+from registration_community import RegistrationCommunity
 
 TIMEOUT = 30
 
