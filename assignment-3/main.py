@@ -41,7 +41,7 @@ async def run_client(group_id: str, blockchain_community_id: bytes, key_file: st
         result = await asyncio.wait_for(overlay.done_future, timeout=TIMEOUT)
         print(f"Done: success={result.success}, message={result.message!r}")
     except asyncio.TimeoutError:
-        print(f"Timed out after {TIMEOUT}s — server not reached or no response.")
+        print(f"Timed out after {TIMEOUT}s: server not reached or no response.")
     finally:
         await ipv8.stop()
 
