@@ -1,3 +1,5 @@
+import struct
+
 from ipv8.messaging.payload_dataclass import VariablePayload, vp_compile
 
 @vp_compile
@@ -35,3 +37,12 @@ class BlockResponse(VariablePayload):
     msg_id = 6
     format_list = ["q", "varlenH", "varlenH", "q", "q", "q", "varlenH", "varlenH"]
     names = ["height", "prev_hash", "txs_hash", "timestamp", "difficulty", "nonce", "block_hash", "tx_hashes"]
+
+def pack_header(prev_hash, txs_hash, timestamp, difficulty, nonce) -> bytes:
+    return (
+        prev_hash                          # 32 bytes
+        + txs_hash                         # 32 bytes
+        + struct.pack(">Q", timestamp)     # 8 bytes, uint64 big-endian
+        + struct.pack(">I", difficulty)    # 4 bytes, uint32 big-endian
+        + struct.pack(">Q", nonce)         # 8 bytes, uint64 big-endian
+    )
