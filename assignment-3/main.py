@@ -11,6 +11,8 @@ from ipv8.configuration import (
 from ipv8_service import IPv8
 
 from registration_community import RegistrationCommunity
+from blockchain_community import BlockchainCommunity
+
 
 TIMEOUT = 30
 
@@ -57,6 +59,7 @@ def main() -> None:
     load_dotenv()
     group_id = require_env("GROUP_ID")
     blockchain_community_id = bytes.fromhex(require_env("BLOCKCHAIN_COMMUNITY_ID"))
+    BlockchainCommunity.community_id = blockchain_community_id
     key_file = require_env("KEY_FILE")
 
     asyncio.run(run_client(group_id, blockchain_community_id, key_file))

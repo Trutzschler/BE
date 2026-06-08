@@ -1,7 +1,52 @@
 import struct
 import hashlib
+from dataclasses import dataclass, field
 
 from ipv8.messaging.payload_dataclass import VariablePayload, vp_compile
+
+
+@dataclass
+class Transaction:
+    sender_key: bytes
+    data: bytes
+    timestamp: int
+    signature: bytes
+
+    @property
+    def hash(self) -> bytes:
+        return hashlib.sha256(
+            self.sender_key + self.data + struct.pack(">q", self.timestamp) + self.signature
+        ).digest()
+
+
+@dataclass
+class Block:
+    height: int
+    prev_hash: bytes
+    txs_hash: bytes
+    timestamp: int
+    difficulty: int
+    nonce: int
+    hash: bytes
+    transactions: list[Transaction] = field(default_factory=list)
+
+def genesis_block() -> Block:
+    prev_hash = bytes(32)          # no parent
+    transactions = []
+    txs_hash = compute_txs_hash([])  # SHA256(b"")
+    timestamp = 0
+    difficulty = 1
+    nonce, h = mine(prev_hash, txs_hash, timestamp, difficulty)
+    return Block(
+        height=0,
+        prev_hash=prev_hash,
+        txs_hash=txs_hash,
+        timestamp=timestamp,
+        difficulty=difficulty,
+        nonce=nonce,
+        hash=h,
+        transactions=transactions,
+    )
 
 @vp_compile
 class SubmitTransaction(VariablePayload):
@@ -66,3 +111,14 @@ def mine(prev_hash, txs_hash, timestamp, difficulty) -> tuple[int, bytes]:
 
 def compute_txs_hash(tx_hashes: list[bytes]) -> bytes:
     return hashlib.sha256(b"".join(tx_hashes)).digest()
+
+class BlockchainCommunity(Community, PeerObserver):
+    community_id = b""  # set at runtime from .env
+    
+    def __init__(self, settings):
+        super().__init__(settings)
+        self.chain: list[Block] = [genesis_block()]
+        self.mempool: list[Transaction] = []
+        self.add_message_handler(SubmitTransaction, self.on_submit_transaction)
+        self.add_message_handler(GetChainHeight, self.on_get_chain_height)
+        self.add_message_handler(GetBlock, self.on_get_block)
