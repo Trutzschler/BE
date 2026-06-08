@@ -63,3 +63,6 @@ def mine(prev_hash, txs_hash, timestamp, difficulty) -> tuple[int, bytes]:
         if meets_difficulty(h, difficulty):
             return nonce, h
         nonce += 1
+
+def compute_txs_hash(tx_hashes: list[bytes]) -> bytes:
+    return hashlib.sha256(b"".join(tx_hashes)).digest()
