@@ -3,6 +3,10 @@ import hashlib
 from dataclasses import dataclass, field
 
 from ipv8.messaging.payload_dataclass import VariablePayload, vp_compile
+from ipv8.community import Community, CommunitySettings
+from ipv8.lazy_community import Peer, lazy_wrapper
+from ipv8.peerdiscovery.network import PeerObserver
+
 
 
 @dataclass
@@ -115,10 +119,78 @@ def compute_txs_hash(tx_hashes: list[bytes]) -> bytes:
 class BlockchainCommunity(Community, PeerObserver):
     community_id = b""  # set at runtime from .env
     
-    def __init__(self, settings):
+    def __init__(self, settings: CommunitySettings) -> None:
         super().__init__(settings)
         self.chain: list[Block] = [genesis_block()]
         self.mempool: list[Transaction] = []
         self.add_message_handler(SubmitTransaction, self.on_submit_transaction)
         self.add_message_handler(GetChainHeight, self.on_get_chain_height)
         self.add_message_handler(GetBlock, self.on_get_block)
+
+    @lazy_wrapper(GetBlock)
+    def on_get_block(self, peer: Peer, msg: GetBlock) -> None:
+        if msg.height < 0 or msg.height >= len(self.chain):
+            return
+        block = self.chain[msg.height]
+        tx_hashes = b"".join(tx.hash for tx in block.transactions)
+        self.ez_send(peer, BlockResponse(
+            height=block.height,
+            prev_hash=block.prev_hash,
+            txs_hash=block.txs_hash,
+            timestamp=block.timestamp,
+            difficulty=block.difficulty,
+            nonce=block.nonce,
+            block_hash=block.hash,
+            tx_hashes=tx_hashes,
+        ))
+        
+    @lazy_wrapper(SubmitTransaction)
+    def on_submit_transaction(self, peer: Peer, msg: SubmitTransaction) -> None:
+        # Reconstruct and verify the signature
+        try:
+            public_key = self.crypto.key_from_public_bin(msg.sender_key)
+            signing_payload = msg.data + struct.pack(">q", msg.timestamp)
+            public_key.verify(msg.signature, signing_payload)
+        except Exception as e:
+            self.ez_send(peer, SubmitTransactionResponse(
+                success=False,
+                tx_hash=b"",
+                message=f"Invalid signature: {e}",
+            ))
+            return
+
+        # Build the Transaction object
+        tx = Transaction(
+            sender_key=msg.sender_key,
+            data=msg.data,
+            timestamp=msg.timestamp,
+            signature=msg.signature,
+        )
+
+        # Check for duplicates
+        tx_hash = tx.hash
+        if any(t.hash == tx_hash for t in self.mempool):
+            self.ez_send(peer, SubmitTransactionResponse(
+                success=False,
+                tx_hash=tx_hash,
+                message="Transaction already in mempool",
+            ))
+            return
+
+        # Add to mempool and respond
+        self.mempool.append(tx)
+        self.ez_send(peer, SubmitTransactionResponse(
+            success=True,
+            tx_hash=tx_hash,
+            message="Transaction accepted",
+        ))
+
+    @lazy_wrapper(GetChainHeight)
+    def on_get_chain_heigt(self, peer: Peer, msg: GetChainHeight):
+        tip = self.chain[-1]
+        self.ez_send(peer, ChainHeightResponse(
+            request_id=msg.request_id,
+            height=len(self.chain) - 1,
+            tip_hash=tip.hash,
+        ))
+    #   reply with ChainHeightResponse(request_id, len(chain)-1, chain[-1].hash)
