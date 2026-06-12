@@ -34,13 +34,12 @@ class Block:
     difficulty: int
     nonce: int
     hash: bytes
-    transactions: list[Transaction] = field(default_factory=list)
+    tx_hashes: list[bytes] = field(default_factory=list)
 
 
 def genesis_block() -> Block:
-    prev_hash = bytes(32)  # no parent
-    transactions = []
-    txs_hash = compute_txs_hash([])  # SHA256(b"")
+    prev_hash = bytes(32)
+    txs_hash = compute_txs_hash([])
     timestamp = 0
     difficulty = 1
     nonce, h = mine(prev_hash, txs_hash, timestamp, difficulty)
@@ -52,7 +51,7 @@ def genesis_block() -> Block:
         difficulty=difficulty,
         nonce=nonce,
         hash=h,
-        transactions=transactions,
+        tx_hashes=[],
     )
 
 
@@ -156,7 +155,7 @@ class BlockchainCommunity(Community, PeerObserver):
         if msg.height < 0 or msg.height >= len(self.chain):
             return
         block = self.chain[msg.height]
-        tx_hashes = b"".join(tx.hash for tx in block.transactions)
+        tx_hashes = b"".join(block.tx_hashes)
         self.ez_send(
             peer,
             BlockResponse(
@@ -176,7 +175,9 @@ class BlockchainCommunity(Community, PeerObserver):
         # Reconstruct and verify the signature
         try:
             public_key = self.crypto.key_from_public_bin(msg.sender_key)
-            signing_payload = msg.data + struct.pack(">q", msg.timestamp)
+            signing_payload = (
+                msg.sender_key + msg.data + struct.pack(">q", msg.timestamp)
+            )
             public_key.verify(msg.signature, signing_payload)
         except Exception as e:
             self.ez_send(
@@ -222,7 +223,7 @@ class BlockchainCommunity(Community, PeerObserver):
         )
 
     @lazy_wrapper(GetChainHeight)
-    def on_get_chain_heigt(self, peer: Peer, msg: GetChainHeight):
+    def on_get_chain_height(self, peer: Peer, msg: GetChainHeight) -> None:
         tip = self.chain[-1]
         self.ez_send(
             peer,
@@ -232,5 +233,3 @@ class BlockchainCommunity(Community, PeerObserver):
                 tip_hash=tip.hash,
             ),
         )
-
-    #   reply with ChainHeightResponse(request_id, len(chain)-1, chain[-1].hash)
