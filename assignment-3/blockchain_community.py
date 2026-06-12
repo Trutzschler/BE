@@ -139,22 +139,108 @@ def compute_txs_hash(tx_hashes: list[bytes]) -> bytes:
     return hashlib.sha256(b"".join(tx_hashes)).digest()
 
 
+def validate_block(block: Block) -> bool:
+    """Self-consistency: header hashes to its claimed hash, PoW holds, body commits."""
+    header = pack_header(
+        block.prev_hash, block.txs_hash, block.timestamp, block.difficulty, block.nonce
+    )
+    if block_hash(header) != block.hash:
+        return False
+    if not meets_difficulty(block.hash, block.difficulty):
+        return False
+    return compute_txs_hash(block.tx_hashes) == block.txs_hash
+
+
 class BlockchainCommunity(Community, PeerObserver):
     community_id = b""  # set at runtime from .env
 
     def __init__(self, settings: CommunitySettings) -> None:
         super().__init__(settings)
-        self.chain: list[Block] = [genesis_block()]
-        self.mempool: list[Transaction] = []
+        genesis = genesis_block()
+        self.blocks: dict[bytes, Block] = {genesis.hash: genesis}
+        self.tip_hash: bytes = genesis.hash
+        self.canonical: list[Block] = [genesis]
+        self.included: set[bytes] = set()
+        self.txpool: dict[bytes, Transaction] = {}
+        self.orphans: dict[bytes, Block] = {}
+        self.mempool_version: int = 0
+        self.teammates: set[bytes] = set()
         self.add_message_handler(SubmitTransaction, self.on_submit_transaction)
         self.add_message_handler(GetChainHeight, self.on_get_chain_height)
         self.add_message_handler(GetBlock, self.on_get_block)
 
+    @property
+    def tip(self) -> Block:
+        return self.blocks[self.tip_hash]
+
+    @property
+    def height(self) -> int:
+        return self.tip.height
+
+    def pending_txs(self) -> list[Transaction]:
+        return [tx for h, tx in self.txpool.items() if h not in self.included]
+
+    def add_tx(self, tx: Transaction) -> bool:
+        """Record a full transaction. Returns True if it was new."""
+        if tx.hash in self.txpool:
+            return False
+        self.txpool[tx.hash] = tx
+        self.mempool_version += 1
+        return True
+
+    def add_block(self, block: Block) -> bool:
+        """Link a validated block to a known parent and refresh the canonical chain."""
+        if block.hash in self.blocks:
+            return False
+        parent = self.blocks.get(block.prev_hash)
+        if parent is None:
+            self.orphans[block.prev_hash] = block
+            return False
+        if block.height != parent.height + 1:
+            return False
+        self.blocks[block.hash] = block
+        self._attach_orphans(block.hash)
+        self._recompute_tip()
+        return True
+
+    def _attach_orphans(self, parent_hash: bytes) -> None:
+        orphan = self.orphans.pop(parent_hash, None)
+        if orphan is None:
+            return
+        if orphan.height == self.blocks[parent_hash].height + 1:
+            self.blocks[orphan.hash] = orphan
+            self._attach_orphans(orphan.hash)
+
+    def _recompute_tip(self) -> None:
+        best = self.blocks[self.tip_hash]
+        for b in self.blocks.values():
+            if b.height > best.height or (
+                b.height == best.height and b.hash < best.hash
+            ):
+                best = b
+        if best.hash != self.tip_hash:
+            self.tip_hash = best.hash
+            self._rebuild_canonical()
+
+    def _rebuild_canonical(self) -> None:
+        chain: list[Block] = []
+        h = self.tip_hash
+        while True:
+            b = self.blocks[h]
+            chain.append(b)
+            if b.height == 0:
+                break
+            h = b.prev_hash
+        chain.reverse()
+        self.canonical = chain
+        self.included = {tx for b in chain for tx in b.tx_hashes}
+        self.mempool_version += 1
+
     @lazy_wrapper(GetBlock)
     def on_get_block(self, peer: Peer, msg: GetBlock) -> None:
-        if msg.height < 0 or msg.height >= len(self.chain):
+        if msg.height < 0 or msg.height >= len(self.canonical):
             return
-        block = self.chain[msg.height]
+        block = self.canonical[msg.height]
         tx_hashes = b"".join(block.tx_hashes)
         self.ez_send(
             peer,
@@ -190,46 +276,29 @@ class BlockchainCommunity(Community, PeerObserver):
             )
             return
 
-        # Build the Transaction object
         tx = Transaction(
             sender_key=msg.sender_key,
             data=msg.data,
             timestamp=msg.timestamp,
             signature=msg.signature,
         )
-
-        # Check for duplicates
-        tx_hash = tx.hash
-        if any(t.hash == tx_hash for t in self.mempool):
-            self.ez_send(
-                peer,
-                SubmitTransactionResponse(
-                    success=False,
-                    tx_hash=tx_hash,
-                    message="Transaction already in mempool",
-                ),
-            )
-            return
-
-        # Add to mempool and respond
-        self.mempool.append(tx)
+        self.add_tx(tx)
         self.ez_send(
             peer,
             SubmitTransactionResponse(
                 success=True,
-                tx_hash=tx_hash,
+                tx_hash=tx.hash,
                 message="Transaction accepted",
             ),
         )
 
     @lazy_wrapper(GetChainHeight)
     def on_get_chain_height(self, peer: Peer, msg: GetChainHeight) -> None:
-        tip = self.chain[-1]
         self.ez_send(
             peer,
             ChainHeightResponse(
                 request_id=msg.request_id,
-                height=len(self.chain) - 1,
-                tip_hash=tip.hash,
+                height=self.height,
+                tip_hash=self.tip_hash,
             ),
         )
