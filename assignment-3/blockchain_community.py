@@ -8,7 +8,6 @@ from ipv8.lazy_community import Peer, lazy_wrapper
 from ipv8.peerdiscovery.network import PeerObserver
 
 
-
 @dataclass
 class Transaction:
     sender_key: bytes
@@ -19,7 +18,10 @@ class Transaction:
     @property
     def hash(self) -> bytes:
         return hashlib.sha256(
-            self.sender_key + self.data + struct.pack(">q", self.timestamp) + self.signature
+            self.sender_key
+            + self.data
+            + struct.pack(">q", self.timestamp)
+            + self.signature
         ).digest()
 
 
@@ -34,8 +36,9 @@ class Block:
     hash: bytes
     transactions: list[Transaction] = field(default_factory=list)
 
+
 def genesis_block() -> Block:
-    prev_hash = bytes(32)          # no parent
+    prev_hash = bytes(32)  # no parent
     transactions = []
     txs_hash = compute_txs_hash([])  # SHA256(b"")
     timestamp = 0
@@ -52,11 +55,13 @@ def genesis_block() -> Block:
         transactions=transactions,
     )
 
+
 @vp_compile
 class SubmitTransaction(VariablePayload):
     msg_id = 1
     format_list = ["varlenH", "varlenH", "q", "varlenH"]
     names = ["sender_key", "data", "timestamp", "signature"]
+
 
 @vp_compile
 class SubmitTransactionResponse(VariablePayload):
@@ -64,11 +69,13 @@ class SubmitTransactionResponse(VariablePayload):
     format_list = ["?", "varlenH", "varlenHutf8"]
     names = ["success", "tx_hash", "message"]
 
+
 @vp_compile
 class GetChainHeight(VariablePayload):
     msg_id = 3
     format_list = ["q"]
     names = ["request_id"]
+
 
 @vp_compile
 class ChainHeightResponse(VariablePayload):
@@ -76,33 +83,48 @@ class ChainHeightResponse(VariablePayload):
     format_list = ["q", "q", "varlenH"]
     names = ["request_id", "height", "tip_hash"]
 
+
 @vp_compile
 class GetBlock(VariablePayload):
     msg_id = 5
     format_list = ["q"]
     names = ["height"]
 
+
 @vp_compile
 class BlockResponse(VariablePayload):
     msg_id = 6
     format_list = ["q", "varlenH", "varlenH", "q", "q", "q", "varlenH", "varlenH"]
-    names = ["height", "prev_hash", "txs_hash", "timestamp", "difficulty", "nonce", "block_hash", "tx_hashes"]
+    names = [
+        "height",
+        "prev_hash",
+        "txs_hash",
+        "timestamp",
+        "difficulty",
+        "nonce",
+        "block_hash",
+        "tx_hashes",
+    ]
+
 
 def pack_header(prev_hash, txs_hash, timestamp, difficulty, nonce) -> bytes:
     return (
-        prev_hash                           # 32 bytes
-        + txs_hash                          # 32 bytes
-        + struct.pack(">Q", timestamp)      # 8 bytes, uint64 big-endian
-        + struct.pack(">I", difficulty)     # 4 bytes, uint32 big-endian
-        + struct.pack(">Q", nonce)          # 8 bytes, uint64 big-endian
+        prev_hash  # 32 bytes
+        + txs_hash  # 32 bytes
+        + struct.pack(">Q", timestamp)  # 8 bytes, uint64 big-endian
+        + struct.pack(">I", difficulty)  # 4 bytes, uint32 big-endian
+        + struct.pack(">Q", nonce)  # 8 bytes, uint64 big-endian
     )
+
 
 def block_hash(header: bytes) -> bytes:
     return hashlib.sha256(header).digest()
 
+
 def meets_difficulty(hash_bytes: bytes, difficulty: int) -> bool:
     value = int.from_bytes(hash_bytes, "big")
-    return value >> (256 - difficulty) == 0 # check if leading bits are 0s
+    return value >> (256 - difficulty) == 0  # check if leading bits are 0s
+
 
 def mine(prev_hash, txs_hash, timestamp, difficulty) -> tuple[int, bytes]:
     nonce = 0
@@ -113,12 +135,14 @@ def mine(prev_hash, txs_hash, timestamp, difficulty) -> tuple[int, bytes]:
             return nonce, h
         nonce += 1
 
+
 def compute_txs_hash(tx_hashes: list[bytes]) -> bytes:
     return hashlib.sha256(b"".join(tx_hashes)).digest()
 
+
 class BlockchainCommunity(Community, PeerObserver):
     community_id = b""  # set at runtime from .env
-    
+
     def __init__(self, settings: CommunitySettings) -> None:
         super().__init__(settings)
         self.chain: list[Block] = [genesis_block()]
@@ -133,17 +157,20 @@ class BlockchainCommunity(Community, PeerObserver):
             return
         block = self.chain[msg.height]
         tx_hashes = b"".join(tx.hash for tx in block.transactions)
-        self.ez_send(peer, BlockResponse(
-            height=block.height,
-            prev_hash=block.prev_hash,
-            txs_hash=block.txs_hash,
-            timestamp=block.timestamp,
-            difficulty=block.difficulty,
-            nonce=block.nonce,
-            block_hash=block.hash,
-            tx_hashes=tx_hashes,
-        ))
-        
+        self.ez_send(
+            peer,
+            BlockResponse(
+                height=block.height,
+                prev_hash=block.prev_hash,
+                txs_hash=block.txs_hash,
+                timestamp=block.timestamp,
+                difficulty=block.difficulty,
+                nonce=block.nonce,
+                block_hash=block.hash,
+                tx_hashes=tx_hashes,
+            ),
+        )
+
     @lazy_wrapper(SubmitTransaction)
     def on_submit_transaction(self, peer: Peer, msg: SubmitTransaction) -> None:
         # Reconstruct and verify the signature
@@ -152,11 +179,14 @@ class BlockchainCommunity(Community, PeerObserver):
             signing_payload = msg.data + struct.pack(">q", msg.timestamp)
             public_key.verify(msg.signature, signing_payload)
         except Exception as e:
-            self.ez_send(peer, SubmitTransactionResponse(
-                success=False,
-                tx_hash=b"",
-                message=f"Invalid signature: {e}",
-            ))
+            self.ez_send(
+                peer,
+                SubmitTransactionResponse(
+                    success=False,
+                    tx_hash=b"",
+                    message=f"Invalid signature: {e}",
+                ),
+            )
             return
 
         # Build the Transaction object
@@ -170,27 +200,37 @@ class BlockchainCommunity(Community, PeerObserver):
         # Check for duplicates
         tx_hash = tx.hash
         if any(t.hash == tx_hash for t in self.mempool):
-            self.ez_send(peer, SubmitTransactionResponse(
-                success=False,
-                tx_hash=tx_hash,
-                message="Transaction already in mempool",
-            ))
+            self.ez_send(
+                peer,
+                SubmitTransactionResponse(
+                    success=False,
+                    tx_hash=tx_hash,
+                    message="Transaction already in mempool",
+                ),
+            )
             return
 
         # Add to mempool and respond
         self.mempool.append(tx)
-        self.ez_send(peer, SubmitTransactionResponse(
-            success=True,
-            tx_hash=tx_hash,
-            message="Transaction accepted",
-        ))
+        self.ez_send(
+            peer,
+            SubmitTransactionResponse(
+                success=True,
+                tx_hash=tx_hash,
+                message="Transaction accepted",
+            ),
+        )
 
     @lazy_wrapper(GetChainHeight)
     def on_get_chain_heigt(self, peer: Peer, msg: GetChainHeight):
         tip = self.chain[-1]
-        self.ez_send(peer, ChainHeightResponse(
-            request_id=msg.request_id,
-            height=len(self.chain) - 1,
-            tip_hash=tip.hash,
-        ))
+        self.ez_send(
+            peer,
+            ChainHeightResponse(
+                request_id=msg.request_id,
+                height=len(self.chain) - 1,
+                tip_hash=tip.hash,
+            ),
+        )
+
     #   reply with ChainHeightResponse(request_id, len(chain)-1, chain[-1].hash)
