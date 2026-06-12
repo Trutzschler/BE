@@ -50,7 +50,7 @@ async def run_client(group_id: str, blockchain_community_id: bytes, key_file: st
 
 def require_env(key: str) -> str:
     value = os.environ.get(key)
-    if value is None:
+    if not value:
         raise Exception(f"{key} must be set.")
     return value
 
@@ -59,6 +59,10 @@ def main() -> None:
     load_dotenv()
     group_id = require_env("GROUP_ID")
     blockchain_community_id = bytes.fromhex(require_env("BLOCKCHAIN_COMMUNITY_ID"))
+    if len(blockchain_community_id) != 20:
+        raise Exception(
+            f"BLOCKCHAIN_COMMUNITY_ID must be 20 bytes / 40 hex, got {len(blockchain_community_id)} bytes."
+        )
     BlockchainCommunity.community_id = blockchain_community_id
     key_file = require_env("KEY_FILE")
 
