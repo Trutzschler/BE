@@ -106,6 +106,48 @@ class BlockResponse(VariablePayload):
     ]
 
 
+# Internal gossip between the 3 group nodes (ids >= 7, not used by the server).
+_BLOCK_FORMAT = ["q", "varlenH", "varlenH", "q", "q", "q", "varlenH", "varlenH"]
+_BLOCK_NAMES = [
+    "height",
+    "prev_hash",
+    "txs_hash",
+    "timestamp",
+    "difficulty",
+    "nonce",
+    "block_hash",
+    "tx_hashes",
+]
+
+
+@vp_compile
+class NewBlock(VariablePayload):
+    msg_id = 7
+    format_list = _BLOCK_FORMAT
+    names = _BLOCK_NAMES
+
+
+@vp_compile
+class NewTransaction(VariablePayload):
+    msg_id = 8
+    format_list = ["varlenH", "varlenH", "q", "varlenH"]
+    names = ["sender_key", "data", "timestamp", "signature"]
+
+
+@vp_compile
+class GetBlockByHash(VariablePayload):
+    msg_id = 9
+    format_list = ["varlenH"]
+    names = ["block_hash"]
+
+
+@vp_compile
+class BlockByHash(VariablePayload):
+    msg_id = 10
+    format_list = _BLOCK_FORMAT
+    names = _BLOCK_NAMES
+
+
 def pack_header(prev_hash, txs_hash, timestamp, difficulty, nonce) -> bytes:
     return (
         prev_hash  # 32 bytes
@@ -139,6 +181,10 @@ def compute_txs_hash(tx_hashes: list[bytes]) -> bytes:
     return hashlib.sha256(b"".join(tx_hashes)).digest()
 
 
+def split_tx_hashes(blob: bytes) -> list[bytes]:
+    return [blob[i : i + 32] for i in range(0, len(blob), 32)]
+
+
 def validate_block(block: Block) -> bool:
     """Self-consistency: header hashes to its claimed hash, PoW holds, body commits."""
     header = pack_header(
@@ -168,6 +214,10 @@ class BlockchainCommunity(Community, PeerObserver):
         self.add_message_handler(SubmitTransaction, self.on_submit_transaction)
         self.add_message_handler(GetChainHeight, self.on_get_chain_height)
         self.add_message_handler(GetBlock, self.on_get_block)
+        self.add_message_handler(NewBlock, self.on_new_block)
+        self.add_message_handler(NewTransaction, self.on_new_transaction)
+        self.add_message_handler(GetBlockByHash, self.on_get_block_by_hash)
+        self.add_message_handler(BlockByHash, self.on_block_by_hash)
 
     @property
     def tip(self) -> Block:
@@ -236,6 +286,67 @@ class BlockchainCommunity(Community, PeerObserver):
         self.included = {tx for b in chain for tx in b.tx_hashes}
         self.mempool_version += 1
 
+    def _teammate_peers(self) -> list[Peer]:
+        return [
+            p for p in self.get_peers() if p.public_key.key_to_bin() in self.teammates
+        ]
+
+    def _is_teammate(self, peer: Peer) -> bool:
+        return peer.public_key.key_to_bin() in self.teammates
+
+    def _block_kwargs(self, block: Block) -> dict:
+        return {
+            "height": block.height,
+            "prev_hash": block.prev_hash,
+            "txs_hash": block.txs_hash,
+            "timestamp": block.timestamp,
+            "difficulty": block.difficulty,
+            "nonce": block.nonce,
+            "block_hash": block.hash,
+            "tx_hashes": b"".join(block.tx_hashes),
+        }
+
+    def _block_from_wire(self, msg) -> Block:
+        return Block(
+            height=msg.height,
+            prev_hash=msg.prev_hash,
+            txs_hash=msg.txs_hash,
+            timestamp=msg.timestamp,
+            difficulty=msg.difficulty,
+            nonce=msg.nonce,
+            hash=msg.block_hash,
+            tx_hashes=split_tx_hashes(msg.tx_hashes),
+        )
+
+    def broadcast_block(self, block: Block) -> None:
+        payload = NewBlock(**self._block_kwargs(block))
+        for peer in self._teammate_peers():
+            self.ez_send(peer, payload)
+
+    def broadcast_tx(self, tx: Transaction) -> None:
+        payload = NewTransaction(tx.sender_key, tx.data, tx.timestamp, tx.signature)
+        for peer in self._teammate_peers():
+            self.ez_send(peer, payload)
+
+    def _verify_tx(self, sender_key, data, timestamp, signature) -> bool:
+        try:
+            public_key = self.crypto.key_from_public_bin(sender_key)
+            payload = sender_key + data + struct.pack(">q", timestamp)
+            public_key.verify(signature, payload)
+            return True
+        except Exception:
+            return False
+
+    def integrate_block(self, block: Block, source: Peer | None = None) -> None:
+        """Validate, link, and re-flood a block; pull its parent if it is an orphan."""
+        if block.hash in self.blocks or not validate_block(block):
+            return
+        had_parent = block.prev_hash in self.blocks
+        if self.add_block(block):
+            self.broadcast_block(block)
+        elif not had_parent and source is not None:
+            self.ez_send(source, GetBlockByHash(block_hash=block.prev_hash))
+
     @lazy_wrapper(GetBlock)
     def on_get_block(self, peer: Peer, msg: GetBlock) -> None:
         if msg.height < 0 or msg.height >= len(self.canonical):
@@ -258,20 +369,13 @@ class BlockchainCommunity(Community, PeerObserver):
 
     @lazy_wrapper(SubmitTransaction)
     def on_submit_transaction(self, peer: Peer, msg: SubmitTransaction) -> None:
-        # Reconstruct and verify the signature
-        try:
-            public_key = self.crypto.key_from_public_bin(msg.sender_key)
-            signing_payload = (
-                msg.sender_key + msg.data + struct.pack(">q", msg.timestamp)
-            )
-            public_key.verify(msg.signature, signing_payload)
-        except Exception as e:
+        if not self._verify_tx(msg.sender_key, msg.data, msg.timestamp, msg.signature):
             self.ez_send(
                 peer,
                 SubmitTransactionResponse(
                     success=False,
                     tx_hash=b"",
-                    message=f"Invalid signature: {e}",
+                    message="Invalid signature",
                 ),
             )
             return
@@ -282,7 +386,8 @@ class BlockchainCommunity(Community, PeerObserver):
             timestamp=msg.timestamp,
             signature=msg.signature,
         )
-        self.add_tx(tx)
+        if self.add_tx(tx):
+            self.broadcast_tx(tx)
         self.ez_send(
             peer,
             SubmitTransactionResponse(
@@ -302,3 +407,33 @@ class BlockchainCommunity(Community, PeerObserver):
                 tip_hash=self.tip_hash,
             ),
         )
+
+    @lazy_wrapper(NewBlock)
+    def on_new_block(self, peer: Peer, msg: NewBlock) -> None:
+        if not self._is_teammate(peer):
+            return
+        self.integrate_block(self._block_from_wire(msg), source=peer)
+
+    @lazy_wrapper(NewTransaction)
+    def on_new_transaction(self, peer: Peer, msg: NewTransaction) -> None:
+        if not self._is_teammate(peer):
+            return
+        if not self._verify_tx(msg.sender_key, msg.data, msg.timestamp, msg.signature):
+            return
+        tx = Transaction(msg.sender_key, msg.data, msg.timestamp, msg.signature)
+        if self.add_tx(tx):
+            self.broadcast_tx(tx)
+
+    @lazy_wrapper(GetBlockByHash)
+    def on_get_block_by_hash(self, peer: Peer, msg: GetBlockByHash) -> None:
+        if not self._is_teammate(peer):
+            return
+        block = self.blocks.get(msg.block_hash)
+        if block is not None:
+            self.ez_send(peer, BlockByHash(**self._block_kwargs(block)))
+
+    @lazy_wrapper(BlockByHash)
+    def on_block_by_hash(self, peer: Peer, msg: BlockByHash) -> None:
+        if not self._is_teammate(peer):
+            return
+        self.integrate_block(self._block_from_wire(msg), source=peer)
