@@ -1,58 +1,28 @@
+import asyncio
 import struct
-import hashlib
-from dataclasses import dataclass, field
+import time
 
 from ipv8.messaging.payload_dataclass import VariablePayload, vp_compile
 from ipv8.community import Community, CommunitySettings
 from ipv8.lazy_community import Peer, lazy_wrapper
 from ipv8.peerdiscovery.network import PeerObserver
 
+from chain import (
+    Block,
+    Transaction,
+    compute_txs_hash,
+    genesis_block,
+    search_nonce,
+    split_tx_hashes,
+    validate_block,
+)
 
-@dataclass
-class Transaction:
-    sender_key: bytes
-    data: bytes
-    timestamp: int
-    signature: bytes
-
-    @property
-    def hash(self) -> bytes:
-        return hashlib.sha256(
-            self.sender_key
-            + self.data
-            + struct.pack(">q", self.timestamp)
-            + self.signature
-        ).digest()
-
-
-@dataclass
-class Block:
-    height: int
-    prev_hash: bytes
-    txs_hash: bytes
-    timestamp: int
-    difficulty: int
-    nonce: int
-    hash: bytes
-    tx_hashes: list[bytes] = field(default_factory=list)
-
-
-def genesis_block() -> Block:
-    prev_hash = bytes(32)
-    txs_hash = compute_txs_hash([])
-    timestamp = 0
-    difficulty = 1
-    nonce, h = mine(prev_hash, txs_hash, timestamp, difficulty)
-    return Block(
-        height=0,
-        prev_hash=prev_hash,
-        txs_hash=txs_hash,
-        timestamp=timestamp,
-        difficulty=difficulty,
-        nonce=nonce,
-        hash=h,
-        tx_hashes=[],
-    )
+# PoW difficulty (leading zero bits)
+MINING_DIFFICULTY = 17
+# Nonces tried per batch
+MINING_BATCH = 20000
+# Brief pause after a block to allow for propegation
+INTER_BLOCK_PAUSE = 0.1
 
 
 @vp_compile
@@ -148,55 +118,6 @@ class BlockByHash(VariablePayload):
     names = _BLOCK_NAMES
 
 
-def pack_header(prev_hash, txs_hash, timestamp, difficulty, nonce) -> bytes:
-    return (
-        prev_hash  # 32 bytes
-        + txs_hash  # 32 bytes
-        + struct.pack(">Q", timestamp)  # 8 bytes, uint64 big-endian
-        + struct.pack(">I", difficulty)  # 4 bytes, uint32 big-endian
-        + struct.pack(">Q", nonce)  # 8 bytes, uint64 big-endian
-    )
-
-
-def block_hash(header: bytes) -> bytes:
-    return hashlib.sha256(header).digest()
-
-
-def meets_difficulty(hash_bytes: bytes, difficulty: int) -> bool:
-    value = int.from_bytes(hash_bytes, "big")
-    return value >> (256 - difficulty) == 0  # check if leading bits are 0s
-
-
-def mine(prev_hash, txs_hash, timestamp, difficulty) -> tuple[int, bytes]:
-    nonce = 0
-    while True:
-        header = pack_header(prev_hash, txs_hash, timestamp, difficulty, nonce)
-        h = block_hash(header)
-        if meets_difficulty(h, difficulty):
-            return nonce, h
-        nonce += 1
-
-
-def compute_txs_hash(tx_hashes: list[bytes]) -> bytes:
-    return hashlib.sha256(b"".join(tx_hashes)).digest()
-
-
-def split_tx_hashes(blob: bytes) -> list[bytes]:
-    return [blob[i : i + 32] for i in range(0, len(blob), 32)]
-
-
-def validate_block(block: Block) -> bool:
-    """Self-consistency: header hashes to its claimed hash, PoW holds, body commits."""
-    header = pack_header(
-        block.prev_hash, block.txs_hash, block.timestamp, block.difficulty, block.nonce
-    )
-    if block_hash(header) != block.hash:
-        return False
-    if not meets_difficulty(block.hash, block.difficulty):
-        return False
-    return compute_txs_hash(block.tx_hashes) == block.txs_hash
-
-
 class BlockchainCommunity(Community, PeerObserver):
     community_id = b""  # set at runtime from .env
 
@@ -211,6 +132,7 @@ class BlockchainCommunity(Community, PeerObserver):
         self.orphans: dict[bytes, Block] = {}
         self.mempool_version: int = 0
         self.teammates: set[bytes] = set()
+        self._mining: bool = False
         self.add_message_handler(SubmitTransaction, self.on_submit_transaction)
         self.add_message_handler(GetChainHeight, self.on_get_chain_height)
         self.add_message_handler(GetBlock, self.on_get_block)
@@ -346,6 +268,49 @@ class BlockchainCommunity(Community, PeerObserver):
             self.broadcast_block(block)
         elif not had_parent and source is not None:
             self.ez_send(source, GetBlockByHash(block_hash=block.prev_hash))
+
+    def start_mining(self) -> None:
+        if self._mining:
+            return
+        self._mining = True
+        self.register_task("mining", self.mining_loop)
+
+    async def mining_loop(self) -> None:
+        while self._mining:
+            block = await self._mine_candidate()
+            if block is not None and self.add_block(block):
+                self.broadcast_block(block)
+                await asyncio.sleep(INTER_BLOCK_PAUSE)
+
+    async def _mine_candidate(self) -> Block | None:
+        """Grind nonces on the current tip in batches, abandoning a stale candidate."""
+        prev_hash = self.tip_hash
+        height = self.tip.height + 1
+        version = self.mempool_version
+        tx_hashes = [tx.hash for tx in self.pending_txs()]
+        txs_hash = compute_txs_hash(tx_hashes)
+        timestamp = int(time.time())
+        nonce = 0
+        while self._mining:
+            found = search_nonce(
+                prev_hash, txs_hash, timestamp, MINING_DIFFICULTY, nonce, MINING_BATCH
+            )
+            if found is not None:
+                nonce, h = found
+                return Block(
+                    height=height,
+                    prev_hash=prev_hash,
+                    txs_hash=txs_hash,
+                    timestamp=timestamp,
+                    difficulty=MINING_DIFFICULTY,
+                    nonce=nonce,
+                    hash=h,
+                    tx_hashes=tx_hashes,
+                )
+            nonce += MINING_BATCH
+            await asyncio.sleep(0)
+            if self.tip_hash != prev_hash or self.mempool_version != version:
+                return None
 
     @lazy_wrapper(GetBlock)
     def on_get_block(self, peer: Peer, msg: GetBlock) -> None:
