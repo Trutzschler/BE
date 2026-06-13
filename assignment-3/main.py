@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 
 from dotenv import load_dotenv
 from ipv8.configuration import (
@@ -13,11 +14,24 @@ from ipv8_service import IPv8
 from registration_community import RegistrationCommunity
 from blockchain_community import BlockchainCommunity
 
+# How often the supervisor re-sends RegisterBlockchain once the group is ready.
+REGISTER_INTERVAL = 90.0
+# How often the supervisor checks readiness.
+SUPERVISOR_TICK = 5.0
 
-TIMEOUT = 30
+
+def add_overlay(builder: ConfigBuilder, name: str) -> None:
+    builder.add_overlay(
+        name,
+        "client",
+        [WalkerDefinition(Strategy.RandomWalk, 10, {"timeout": 3.0})],
+        default_bootstrap_defs,
+        {},
+        [],
+    )
 
 
-async def run_client(
+async def run_node(
     group_id: str,
     blockchain_community_id: bytes,
     key_file: str,
@@ -26,33 +40,45 @@ async def run_client(
 ) -> None:
     builder = ConfigBuilder().clear_keys().clear_overlays()
     builder.add_key("client", "curve25519", key_file)
-    builder.add_overlay(
-        "RegistrationCommunity",
-        "client",
-        [WalkerDefinition(Strategy.RandomWalk, 10, {"timeout": 3.0})],
-        default_bootstrap_defs,
-        {},
-        [("started",)],
-    )
+    add_overlay(builder, "RegistrationCommunity")
+    add_overlay(builder, "BlockchainCommunity")
     ipv8 = IPv8(
         builder.finalize(),
-        extra_communities={"RegistrationCommunity": RegistrationCommunity},
+        extra_communities={
+            "RegistrationCommunity": RegistrationCommunity,
+            "BlockchainCommunity": BlockchainCommunity,
+        },
     )
-    overlay = ipv8.get_overlay(RegistrationCommunity)
-    my_key = overlay.my_peer.public_key.key_to_bin()
+    reg = ipv8.get_overlay(RegistrationCommunity)
+    bc = ipv8.get_overlay(BlockchainCommunity)
+
+    my_key = reg.my_peer.public_key.key_to_bin()
     should_register = force_register or my_key == min({my_key, *teammates})
     print(f"Public key: {my_key.hex()}")
     print(f"Blockchain community ID: {blockchain_community_id.hex()}")
     print(f"Designated registrar: {should_register}")
-    print("Joining registration community and waiting for the server...")
-    overlay.configure(group_id, blockchain_community_id, should_register)
-    await ipv8.start()
 
+    reg.configure(group_id, blockchain_community_id)
+    bc.configure(set(teammates))
+    await ipv8.start()
+    bc.start_mining()
+    print("Mining started; running until interrupted.")
+
+    last_register = 0.0
     try:
-        result = await asyncio.wait_for(overlay.done_future, timeout=TIMEOUT)
-        print(f"Done: success={result.success}, message={result.message!r}")
-    except asyncio.TimeoutError:
-        print(f"Timed out after {TIMEOUT}s: server not reached or no response.")
+        while True:
+            now = time.monotonic()
+            ready = should_register and reg.server is not None and bc.teammates_ready()
+            if ready and now - last_register >= REGISTER_INTERVAL:
+                reg.send_register()
+                last_register = now
+            bc.announce_tip()
+            print(
+                f"height={bc.height} tip={bc.tip_hash.hex()[:12]} "
+                f"teammates={len(bc.connected_teammates())}/{len(bc.teammates)} "
+                f"mempool={len(bc.pending_txs())}"
+            )
+            await asyncio.sleep(SUPERVISOR_TICK)
     finally:
         await ipv8.stop()
 
@@ -81,11 +107,14 @@ def main() -> None:
     ]
     force_register = bool(os.environ.get("FORCE_REGISTER"))
 
-    asyncio.run(
-        run_client(
-            group_id, blockchain_community_id, key_file, teammates, force_register
+    try:
+        asyncio.run(
+            run_node(
+                group_id, blockchain_community_id, key_file, teammates, force_register
+            )
         )
-    )
+    except KeyboardInterrupt:
+        print("Shutting down.")
 
 
 if __name__ == "__main__":

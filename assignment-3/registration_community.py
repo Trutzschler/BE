@@ -1,5 +1,3 @@
-import asyncio
-
 from ipv8.messaging.payload_dataclass import VariablePayload, vp_compile
 from ipv8.community import Community, CommunitySettings
 from ipv8.lazy_community import Peer, lazy_wrapper
@@ -41,19 +39,10 @@ class RegistrationCommunity(Community, PeerObserver):
         self.server: Peer | None = None
         self.group_id: str | None = None
         self.blockchain_community_id: bytes | None = None
-        self.should_register: bool = True
-        self.done_future: asyncio.Future | None = None
 
-    def configure(
-        self,
-        group_id: str,
-        blockchain_community_id: bytes,
-        should_register: bool = True,
-    ) -> None:
+    def configure(self, group_id: str, blockchain_community_id: bytes) -> None:
         self.group_id = group_id
         self.blockchain_community_id = blockchain_community_id
-        self.should_register = should_register
-        self.done_future = asyncio.get_running_loop().create_future()
         self.network.add_peer_observer(self)
 
     def started(self) -> None:
@@ -69,14 +58,9 @@ class RegistrationCommunity(Community, PeerObserver):
         )
 
     def on_peer_added(self, peer: Peer) -> None:
-        print(f"Peer added: {peer.public_key.key_to_bin().hex()}")
         if peer.public_key.key_to_bin() == REGISTRATION_SERVER_PUBLIC_KEY:
+            print("Registration server discovered.")
             self.server = peer
-            if self.should_register:
-                print("Registration server discovered: sending RegisterBlockchain.")
-                self.send_register()
-            else:
-                print("Registration server discovered; not the registrar, skipping.")
 
     def on_peer_removed(self, peer: Peer) -> None:
         if peer.public_key.key_to_bin() == REGISTRATION_SERVER_PUBLIC_KEY:
@@ -93,5 +77,3 @@ class RegistrationCommunity(Community, PeerObserver):
         print(
             f"RegisterResponse: success={response.success}, message={response.message!r}"
         )
-        if self.done_future and not self.done_future.done():
-            self.done_future.set_result(response)

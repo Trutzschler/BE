@@ -149,6 +149,31 @@ class BlockchainCommunity(Community, PeerObserver):
     def height(self) -> int:
         return self.tip.height
 
+    def configure(self, teammates: set[bytes]) -> None:
+        self.teammates = set(teammates)
+        self.network.add_peer_observer(self)
+
+    def connected_teammates(self) -> set[bytes]:
+        return {
+            p.public_key.key_to_bin()
+            for p in self.get_peers()
+            if p.public_key.key_to_bin() in self.teammates
+        }
+
+    def teammates_ready(self) -> bool:
+        return self.teammates <= self.connected_teammates()
+
+    def announce_tip(self) -> None:
+        self.broadcast_block(self.tip)
+
+    def on_peer_added(self, peer: Peer) -> None:
+        # Push our tip so a freshly connected teammate can backfill via GetBlockByHash.
+        if self._is_teammate(peer):
+            self.ez_send(peer, NewBlock(**self._block_kwargs(self.tip)))
+
+    def on_peer_removed(self, peer: Peer) -> None:
+        pass
+
     def pending_txs(self) -> list[Transaction]:
         return [tx for h, tx in self.txpool.items() if h not in self.included]
 
