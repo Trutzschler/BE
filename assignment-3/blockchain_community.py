@@ -118,6 +118,13 @@ class BlockByHash(VariablePayload):
     names = _BLOCK_NAMES
 
 
+@vp_compile
+class GroupPassed(VariablePayload):
+    msg_id = 11
+    format_list = ["varlenHutf8"]
+    names = ["message"]
+
+
 class BlockchainCommunity(Community, PeerObserver):
     community_id = b""  # set at runtime from .env
 
@@ -133,6 +140,8 @@ class BlockchainCommunity(Community, PeerObserver):
         self.mempool_version: int = 0
         self.teammates: set[bytes] = set()
         self._mining: bool = False
+        self.passed: bool = False
+        self.stop_event = asyncio.Event()
         self.add_message_handler(SubmitTransaction, self.on_submit_transaction)
         self.add_message_handler(GetChainHeight, self.on_get_chain_height)
         self.add_message_handler(GetBlock, self.on_get_block)
@@ -140,6 +149,7 @@ class BlockchainCommunity(Community, PeerObserver):
         self.add_message_handler(NewTransaction, self.on_new_transaction)
         self.add_message_handler(GetBlockByHash, self.on_get_block_by_hash)
         self.add_message_handler(BlockByHash, self.on_block_by_hash)
+        self.add_message_handler(GroupPassed, self.on_group_passed)
 
     @property
     def tip(self) -> Block:
@@ -294,6 +304,17 @@ class BlockchainCommunity(Community, PeerObserver):
         elif not had_parent and source is not None:
             self.ez_send(source, GetBlockByHash(block_hash=block.prev_hash))
 
+    def announce_passed(self, message: str) -> None:
+        if self.passed:
+            return
+        self.passed = True
+        self._mining = False
+        peers = self._teammate_peers()
+        print(f"Group passed: {message!r} — notifying {len(peers)} teammate(s) and stopping.")
+        for peer in peers:
+            self.ez_send(peer, GroupPassed(message=message))
+        self.stop_event.set()
+
     def start_mining(self) -> None:
         if self._mining:
             return
@@ -427,3 +448,10 @@ class BlockchainCommunity(Community, PeerObserver):
         if not self._is_teammate(peer):
             return
         self.integrate_block(self._block_from_wire(msg), source=peer)
+
+    @lazy_wrapper(GroupPassed)
+    def on_group_passed(self, peer: Peer, msg: GroupPassed) -> None:
+        if not self._is_teammate(peer) or self.passed:
+            return
+        print(f"Group passed (notified by teammate): {msg.message!r}")
+        self.announce_passed(msg.message)  # re-flood once, then stop

@@ -37,8 +37,10 @@ async def run_node(
     key_file: str,
     teammates: list[bytes],
     force_register: bool,
+    port: int = 8090,
 ) -> None:
     builder = ConfigBuilder().clear_keys().clear_overlays()
+    builder.set_port(port)
     builder.add_key("client", "curve25519", key_file)
     add_overlay(builder, "RegistrationCommunity")
     add_overlay(builder, "BlockchainCommunity")
@@ -58,15 +60,15 @@ async def run_node(
     print(f"Blockchain community ID: {blockchain_community_id.hex()}")
     print(f"Designated registrar: {should_register}")
 
-    reg.configure(group_id, blockchain_community_id)
     bc.configure(set(teammates))
+    reg.configure(group_id, blockchain_community_id, on_passed=bc.announce_passed)
     await ipv8.start()
     bc.start_mining()
     print("Mining started; running until interrupted.")
 
     last_register = 0.0
     try:
-        while True:
+        while not bc.stop_event.is_set():
             now = time.monotonic()
             ready = should_register and reg.server is not None and bc.teammates_ready()
             if ready and now - last_register >= REGISTER_INTERVAL:
@@ -106,11 +108,12 @@ def main() -> None:
         bytes.fromhex(s.strip()) for s in teammates_env.split(",") if s.strip()
     ]
     force_register = bool(os.environ.get("FORCE_REGISTER"))
+    port = int(os.environ.get("PORT", "8090"))
 
     try:
         asyncio.run(
             run_node(
-                group_id, blockchain_community_id, key_file, teammates, force_register
+                group_id, blockchain_community_id, key_file, teammates, force_register, port
             )
         )
     except KeyboardInterrupt:

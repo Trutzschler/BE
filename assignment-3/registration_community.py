@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 from ipv8.messaging.payload_dataclass import VariablePayload, vp_compile
 from ipv8.community import Community, CommunitySettings
 from ipv8.lazy_community import Peer, lazy_wrapper
@@ -39,10 +41,19 @@ class RegistrationCommunity(Community, PeerObserver):
         self.server: Peer | None = None
         self.group_id: str | None = None
         self.blockchain_community_id: bytes | None = None
+        self.passed: bool = False
+        self.pass_message: str = ""
+        self.on_passed: Callable[[str], None] | None = None
 
-    def configure(self, group_id: str, blockchain_community_id: bytes) -> None:
+    def configure(
+        self,
+        group_id: str,
+        blockchain_community_id: bytes,
+        on_passed: Callable[[str], None] | None = None,
+    ) -> None:
         self.group_id = group_id
         self.blockchain_community_id = blockchain_community_id
+        self.on_passed = on_passed
         self.network.add_peer_observer(self)
 
     def started(self) -> None:
@@ -77,3 +88,8 @@ class RegistrationCommunity(Community, PeerObserver):
         print(
             f"RegisterResponse: success={response.success}, message={response.message!r}"
         )
+        if response.success and "passed" in response.message.lower() and not self.passed:
+            self.passed = True
+            self.pass_message = response.message
+            if self.on_passed is not None:
+                self.on_passed(response.message)
