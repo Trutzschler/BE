@@ -12,13 +12,12 @@ from chain import (
     Transaction,
     compute_txs_hash,
     genesis_block,
+    next_difficulty,
     search_nonce,
     split_tx_hashes,
     validate_block,
 )
 
-# PoW difficulty (leading zero bits)
-MINING_DIFFICULTY = 17
 # Nonces tried per batch
 MINING_BATCH = 20000
 # Brief pause after a block to allow for propegation
@@ -336,10 +335,11 @@ class BlockchainCommunity(Community, PeerObserver):
         tx_hashes = [tx.hash for tx in self.pending_txs()]
         txs_hash = compute_txs_hash(tx_hashes)
         timestamp = int(time.time())
+        difficulty = next_difficulty(self.canonical)
         nonce = 0
         while self._mining:
             found = search_nonce(
-                prev_hash, txs_hash, timestamp, MINING_DIFFICULTY, nonce, MINING_BATCH
+                prev_hash, txs_hash, timestamp, difficulty, nonce, MINING_BATCH
             )
             if found is not None:
                 nonce, h = found
@@ -348,7 +348,7 @@ class BlockchainCommunity(Community, PeerObserver):
                     prev_hash=prev_hash,
                     txs_hash=txs_hash,
                     timestamp=timestamp,
-                    difficulty=MINING_DIFFICULTY,
+                    difficulty=difficulty,
                     nonce=nonce,
                     hash=h,
                     tx_hashes=tx_hashes,

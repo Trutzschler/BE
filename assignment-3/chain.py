@@ -79,6 +79,39 @@ def compute_txs_hash(tx_hashes: list[bytes]) -> bytes:
     return hashlib.sha256(b"".join(tx_hashes)).digest()
 
 
+DIFFICULTY_WINDOW = 5  # N
+TARGET_INTERVAL = 5.0  # target seconds for an N-block span
+MIN_DIFFICULTY = 1
+MAX_DIFFICULTY = 256  # hash is 256 bits; meets_difficulty needs 256, difficulty >= 0
+
+
+def median(values: list[int]) -> float:
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2 == 0:
+        return (ordered[mid - 1] + ordered[mid]) / 2
+    return ordered[mid]
+
+
+def next_difficulty(
+    chain: list[Block],
+    window: int = DIFFICULTY_WINDOW,
+    target_interval: float = TARGET_INTERVAL,
+) -> int:
+    """Retarget difficulty from the canonical chain (genesis..tip, ordered by height)."""
+    current_difficulty = chain[-1].difficulty
+    if len(chain) < 2 * window:
+        return current_difficulty
+    recent = [b.timestamp for b in chain[-window:]]
+    prior = [b.timestamp for b in chain[-2 * window : -window]]
+    block_interval = median(recent) - median(prior)
+    if block_interval <= 0:
+        block_interval = 1e-6
+    ratio = min(max(target_interval / block_interval, 0.25), 4.0)
+    new_difficulty = round(current_difficulty * ratio)
+    return min(max(new_difficulty, MIN_DIFFICULTY), MAX_DIFFICULTY)
+
+
 def split_tx_hashes(blob: bytes) -> list[bytes]:
     return [blob[i : i + 32] for i in range(0, len(blob), 32)]
 
