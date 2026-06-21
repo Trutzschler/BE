@@ -9,6 +9,7 @@ from ipv8.peerdiscovery.network import PeerObserver
 
 from chain import (
     Block,
+    DIFFICULTY_WINDOW,
     Transaction,
     compute_txs_hash,
     genesis_block,
@@ -202,7 +203,7 @@ class BlockchainCommunity(Community, PeerObserver):
         if parent is None:
             self.orphans[block.prev_hash] = block
             return False
-        if block.height != parent.height + 1:
+        if block.height != parent.height + 1 or not self._difficulty_ok(block, parent):
             return False
         self.blocks[block.hash] = block
         self._attach_orphans(block.hash)
@@ -213,9 +214,27 @@ class BlockchainCommunity(Community, PeerObserver):
         orphan = self.orphans.pop(parent_hash, None)
         if orphan is None:
             return
-        if orphan.height == self.blocks[parent_hash].height + 1:
+        parent = self.blocks[parent_hash]
+        if orphan.height == parent.height + 1 and self._difficulty_ok(orphan, parent):
             self.blocks[orphan.hash] = orphan
             self._attach_orphans(orphan.hash)
+
+    def _ancestor_tail(self, parent: Block, window: int) -> list[Block]:
+        """Up to the last 2*window blocks ending at parent (oldest..newest)."""
+        tail: list[Block] = []
+        b: Block | None = parent
+        limit = 2 * window
+        while b is not None and len(tail) < limit:
+            tail.append(b)
+            if b.height == 0:
+                break
+            b = self.blocks.get(b.prev_hash)
+        tail.reverse()
+        return tail
+
+    def _difficulty_ok(self, block: Block, parent: Block) -> bool:
+        tail = self._ancestor_tail(parent, DIFFICULTY_WINDOW)
+        return next_difficulty(tail) == block.difficulty
 
     def _recompute_tip(self) -> None:
         best = self.blocks[self.tip_hash]

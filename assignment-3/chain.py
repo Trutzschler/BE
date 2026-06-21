@@ -94,21 +94,21 @@ def median(values: list[int]) -> float:
 
 
 def next_difficulty(
-    chain: list[Block],
+    tail: list[Block],
     window: int = DIFFICULTY_WINDOW,
     target_interval: float = TARGET_INTERVAL,
 ) -> int:
-    """Retarget difficulty from the canonical chain (genesis..tip, ordered by height)."""
-    current_difficulty = chain[-1].difficulty
-    if len(chain) < 2 * window:
-        return current_difficulty
-    recent = [b.timestamp for b in chain[-window:]]
-    prior = [b.timestamp for b in chain[-2 * window : -window]]
+    """tail = ancestor blocks ending at the parent (oldest..newest); tail[-1] is the parent."""
+    parent = tail[-1]
+    if parent.height + 1 < 2 * window:
+        return parent.difficulty
+    recent = [b.timestamp for b in tail[-window:]]
+    prior = [b.timestamp for b in tail[-2 * window : -window]]
     block_interval = median(recent) - median(prior)
     if block_interval <= 0:
         block_interval = 1e-6
     ratio = min(max(target_interval / block_interval, 0.25), 4.0)
-    new_difficulty = round(current_difficulty * ratio)
+    new_difficulty = round(parent.difficulty * ratio)
     return min(max(new_difficulty, MIN_DIFFICULTY), MAX_DIFFICULTY)
 
 
