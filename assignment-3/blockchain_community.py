@@ -9,16 +9,17 @@ from ipv8.peerdiscovery.network import PeerObserver
 
 from chain import (
     Block,
+    DIFFICULTY_WINDOW,
     Transaction,
     compute_txs_hash,
     genesis_block,
+    next_difficulty,
     search_nonce,
     split_tx_hashes,
+    timestamp_plausible,
     validate_block,
 )
 
-# PoW difficulty (leading zero bits)
-MINING_DIFFICULTY = 17
 # Nonces tried per batch
 MINING_BATCH = 20000
 # Brief pause after a block to allow for propegation
@@ -203,7 +204,11 @@ class BlockchainCommunity(Community, PeerObserver):
         if parent is None:
             self.orphans[block.prev_hash] = block
             return False
-        if block.height != parent.height + 1:
+        if (
+            block.height != parent.height + 1
+            or not self._timestamp_ok(block, parent)
+            or not self._difficulty_ok(block, parent)
+        ):
             return False
         self.blocks[block.hash] = block
         self._attach_orphans(block.hash)
@@ -214,9 +219,37 @@ class BlockchainCommunity(Community, PeerObserver):
         orphan = self.orphans.pop(parent_hash, None)
         if orphan is None:
             return
-        if orphan.height == self.blocks[parent_hash].height + 1:
+        parent = self.blocks[parent_hash]
+        if (
+            orphan.height == parent.height + 1
+            and self._timestamp_ok(orphan, parent)
+            and self._difficulty_ok(orphan, parent)
+        ):
             self.blocks[orphan.hash] = orphan
             self._attach_orphans(orphan.hash)
+
+    def _timestamp_ok(self, block: Block, parent: Block) -> bool:
+        return timestamp_plausible(block.timestamp, parent.timestamp, int(time.time()))
+
+    def _ancestor_timestamps(self, parent: Block, window: int) -> list[int]:
+        """Up to the last 2*window raw timestamps ending at parent (oldest..newest)."""
+        timestamps: list[int] = []
+        b: Block | None = parent
+        limit = 2 * window
+        while b is not None and len(timestamps) < limit:
+            timestamps.append(b.timestamp)
+            if b.height == 0:
+                break
+            b = self.blocks.get(b.prev_hash)
+        timestamps.reverse()
+        return timestamps
+
+    def _expected_difficulty(self, parent: Block) -> int:
+        timestamps = self._ancestor_timestamps(parent, DIFFICULTY_WINDOW)
+        return next_difficulty(parent.height, parent.difficulty, timestamps)
+
+    def _difficulty_ok(self, block: Block, parent: Block) -> bool:
+        return self._expected_difficulty(parent) == block.difficulty
 
     def _recompute_tip(self) -> None:
         best = self.blocks[self.tip_hash]
@@ -335,11 +368,12 @@ class BlockchainCommunity(Community, PeerObserver):
         version = self.mempool_version
         tx_hashes = [tx.hash for tx in self.pending_txs()]
         txs_hash = compute_txs_hash(tx_hashes)
-        timestamp = int(time.time())
+        timestamp = max(int(time.time()), self.tip.timestamp)  # never backdate our own block
+        difficulty = self._expected_difficulty(self.tip)
         nonce = 0
         while self._mining:
             found = search_nonce(
-                prev_hash, txs_hash, timestamp, MINING_DIFFICULTY, nonce, MINING_BATCH
+                prev_hash, txs_hash, timestamp, difficulty, nonce, MINING_BATCH
             )
             if found is not None:
                 nonce, h = found
@@ -348,7 +382,7 @@ class BlockchainCommunity(Community, PeerObserver):
                     prev_hash=prev_hash,
                     txs_hash=txs_hash,
                     timestamp=timestamp,
-                    difficulty=MINING_DIFFICULTY,
+                    difficulty=difficulty,
                     nonce=nonce,
                     hash=h,
                     tx_hashes=tx_hashes,

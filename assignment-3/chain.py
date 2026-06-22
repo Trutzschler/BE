@@ -1,5 +1,6 @@
 import struct
 import hashlib
+import math
 from dataclasses import dataclass, field
 
 
@@ -77,6 +78,49 @@ def search_nonce(
 
 def compute_txs_hash(tx_hashes: list[bytes]) -> bytes:
     return hashlib.sha256(b"".join(tx_hashes)).digest()
+
+
+DIFFICULTY_WINDOW = 5  # N
+TARGET_INTERVAL = 5.0  # target seconds for an N-block span
+MIN_DIFFICULTY = 1
+MAX_DIFFICULTY = 256  # hash is 256 bits; meets_difficulty needs 256, difficulty >= 0
+MAX_FUTURE_DRIFT = 60  # seconds a block's timestamp may be ahead of the receiving node's own clock before it's rejected outright
+
+
+def median(values: list[int]) -> float:
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2 == 0:
+        return (ordered[mid - 1] + ordered[mid]) / 2
+    return ordered[mid]
+
+
+def timestamp_plausible(
+    timestamp: int, parent_timestamp: int, now: int, max_future_drift: int = MAX_FUTURE_DRIFT
+) -> bool:
+    return parent_timestamp <= timestamp <= now + max_future_drift
+
+
+def next_difficulty(
+    parent_height: int,
+    parent_difficulty: int,
+    timestamps: list[int],
+    window: int = DIFFICULTY_WINDOW,
+    target_interval: float = TARGET_INTERVAL,
+) -> int:
+    new_height = parent_height + 1
+    if new_height < 2 * window or new_height % window != 0:
+        return parent_difficulty
+    recent = timestamps[-window:]
+    prior = timestamps[-2 * window : -window]
+    block_interval = median(recent) - median(prior)
+    if block_interval <= 0:
+        block_interval = 1e-6
+    ratio = min(max(target_interval / block_interval, 0.25), 4.0)
+    # difficulty is leading-zero BIT COUNT (exponential in required work): doubling the
+    # expected work is +1 bit, so a multiplicative work-ratio becomes an additive bit-shift.
+    new_difficulty = round(parent_difficulty + math.log2(ratio))
+    return min(max(new_difficulty, MIN_DIFFICULTY), MAX_DIFFICULTY)
 
 
 def split_tx_hashes(blob: bytes) -> list[bytes]:
